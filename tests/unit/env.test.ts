@@ -24,6 +24,11 @@ describe("loadEnv", () => {
     });
   });
 
+  it("accepts a CORS origin but rejects values that are not origins", () => {
+    expect(loadEnv({ CORS_ORIGIN: "http://localhost:5173" }).CORS_ORIGIN).toBe("http://localhost:5173");
+    expect(() => loadEnv({ CORS_ORIGIN: "http://localhost:5173/path" })).toThrow(EnvValidationError);
+  });
+
   it("throws a descriptive error for invalid values", () => {
     expect(() => loadEnv({ NODE_ENV: "staging", PORT: "not-a-port" })).toThrow(EnvValidationError);
     try {

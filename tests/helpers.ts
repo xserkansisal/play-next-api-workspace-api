@@ -16,6 +16,7 @@ export interface TestContext {
 }
 
 export interface TestContextOptions {
+  corsOrigin?: string;
   heartbeatMs?: number;
   retryMs?: number;
   replayBufferSize?: number;
@@ -25,7 +26,12 @@ export function createTestContext(path = ":memory:", options: TestContextOptions
   const db = openDatabase(path);
   const events = new ChangeEventHub({ replayBufferSize: options.replayBufferSize });
   const app = createApp({
-    env: { NODE_ENV: "test", SSE_HEARTBEAT_MS: options.heartbeatMs ?? 60_000, SSE_RETRY_MS: options.retryMs ?? 1_500 },
+    env: {
+      NODE_ENV: "test",
+      CORS_ORIGIN: options.corsOrigin,
+      SSE_HEARTBEAT_MS: options.heartbeatMs ?? 60_000,
+      SSE_RETRY_MS: options.retryMs ?? 1_500,
+    },
     db,
     events,
     logger: () => {},

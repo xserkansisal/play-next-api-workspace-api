@@ -39,6 +39,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `HOST`     | `0.0.0.0`     |                                        |
 | `PORT`     | `3000`        | Integer 0–65535                        |
 | `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
+| `CORS_ORIGIN` | unset | Optional single allowed browser origin (for local Vite, `http://localhost:5173`); no credentials are enabled |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
 
