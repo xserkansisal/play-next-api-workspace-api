@@ -5,10 +5,10 @@ let ctx: TestContext;
 let collectionId: string;
 
 beforeEach(async () => {
-  ctx = createTestContext();
+  ctx = await createTestContext();
   collectionId = (await ctx.api.post("/api/v1/collections").send({ name: "Main" }).expect(201)).body.id;
 });
-afterEach(() => ctx.close());
+afterEach(async () => ctx.close());
 
 const itemsUrl = () => `/api/v1/collections/${collectionId}/items`;
 

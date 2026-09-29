@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestContext, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
-beforeEach(() => {
-  ctx = createTestContext();
+beforeEach(async () => {
+  ctx = await createTestContext();
 });
-afterEach(() => ctx.close());
+afterEach(async () => ctx.close());
 
 describe("collections API", () => {
   it("creates, lists (alphabetically), reads, and saves collection metadata", async () => {

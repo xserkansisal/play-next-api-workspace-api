@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTempDir, createTestContext, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
-beforeEach(() => {
-  ctx = createTestContext();
+beforeEach(async () => {
+  ctx = await createTestContext();
 });
-afterEach(() => ctx.close());
+afterEach(async () => ctx.close());
 
 function failOn(table: string, event: "INSERT" | "UPDATE" | "DELETE") {
   ctx.db.$client.exec(
@@ -24,7 +24,7 @@ describe("persistence across reopen", () => {
     const tmp = createTempDir();
     const path = join(tmp.dir, "nested", "api.sqlite");
     try {
-      const first = createTestContext(path);
+      const first = await createTestContext(path);
       const col = (
         await first.api
           .post("/api/v1/collections")
@@ -34,15 +34,15 @@ describe("persistence across reopen", () => {
       const env = (await first.api.post("/api/v1/environments").send({ name: "E", variables: [{ key: "k", value: "v" }] }).expect(201)).body;
       const gone = (await first.api.post("/api/v1/environments").send({ name: "Gone" }).expect(201)).body;
       await first.api.delete(`/api/v1/environments/${gone.id}`).expect(204);
-      first.close();
+      await first.close();
 
-      const second = createTestContext(path);
+      const second = await createTestContext(path);
       try {
         expect((await second.api.get(`/api/v1/collections/${col.id}`).expect(200)).body).toEqual(col);
         expect((await second.api.get(`/api/v1/environments/${env.id}`).expect(200)).body).toEqual(env);
         expect((await second.api.get("/api/v1/trash").expect(200)).body.entries.map((e: { id: string }) => e.id)).toEqual([gone.id]);
       } finally {
-        second.close();
+        await second.close();
       }
     } finally {
       tmp.cleanup();

@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestContext, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
-beforeEach(() => {
-  ctx = createTestContext();
+beforeEach(async () => {
+  ctx = await createTestContext();
 });
-afterEach(() => ctx.close());
+afterEach(async () => ctx.close());
 
 async function createCollection(body: Record<string, unknown>) {
   return (await ctx.api.post("/api/v1/collections").send(body).expect(201)).body;

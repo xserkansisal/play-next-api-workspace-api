@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import http from "node:http";
 import request from "supertest";
 import type { Express } from "express";
 import { createApp } from "../src/app.js";
@@ -12,7 +13,7 @@ export interface TestContext {
   app: Express;
   events: ChangeEventHub;
   api: ReturnType<typeof request>;
-  close: () => void;
+  close: () => Promise<void>;
 }
 
 export interface TestContextOptions {
@@ -22,7 +23,7 @@ export interface TestContextOptions {
   replayBufferSize?: number;
 }
 
-export function createTestContext(path = ":memory:", options: TestContextOptions = {}): TestContext {
+export async function createTestContext(path = ":memory:", options: TestContextOptions = {}): Promise<TestContext> {
   const db = openDatabase(path);
   const events = new ChangeEventHub({ replayBufferSize: options.replayBufferSize });
   const app = createApp({
@@ -36,13 +37,24 @@ export function createTestContext(path = ":memory:", options: TestContextOptions
     events,
     logger: () => {},
   });
+  const server = http.createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
   return {
     db,
     app,
     events,
-    api: request(app),
-    close: () => {
+    api: request(server),
+    close: async () => {
       events.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
       closeDatabase(db);
     },
   };

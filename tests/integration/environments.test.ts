@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestContext, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
-beforeEach(() => {
-  ctx = createTestContext();
+beforeEach(async () => {
+  ctx = await createTestContext();
 });
-afterEach(() => ctx.close());
+afterEach(async () => ctx.close());
 
 describe("environments API", () => {
   it("creates, lists, reads, and saves environments with ordered variables", async () => {

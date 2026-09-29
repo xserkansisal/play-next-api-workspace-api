@@ -7,7 +7,7 @@ let server: RunningServer;
 const clients: SseClient[] = [];
 
 async function setup(options: Parameters<typeof createTestContext>[1] = {}) {
-  ctx = createTestContext(":memory:", options);
+  ctx = await createTestContext(":memory:", options);
   server = await startServer(ctx.app);
 }
 
@@ -25,7 +25,7 @@ async function connectReady(headers: Record<string, string> = {}, path?: string)
 
 afterEach(async () => {
   for (const c of clients.splice(0)) c.close();
-  ctx.close();
+  await ctx.close();
   await server.close();
 });
 
