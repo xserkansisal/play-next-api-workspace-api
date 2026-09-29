@@ -29,6 +29,8 @@ npm run dev            # http://localhost:3000/health
 | `npm run db:check`    | Check generated migrations for consistency     |
 | `npm run db:check-name-keys` | Read-only report of stale case-folded name keys and Unicode name collisions (exit 1 on collisions) |
 
+See [Deployment and operations](docs/deployment.md) for PM2 deployment, migration, and SQLite backup/restore procedures.
+
 ## Configuration
 
 Environment variables are validated with Zod in `src/config/env.ts`:
@@ -124,10 +126,12 @@ data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<
 
 ### Backup and restore
 
-The database is a single SQLite file in WAL mode. Stop the API, then copy `DATABASE_PATH`
-together with any `-wal`/`-shm` files next to it; restore by putting them back while the API is
-stopped. For a hot backup, use `sqlite3 "$DATABASE_PATH" ".backup backup.sqlite"` instead of
-copying files.
+The database is a single SQLite file in WAL mode. For a live backup, use SQLite's online backup
+API (for example `sqlite3 "$DATABASE_PATH" ".backup backup.sqlite"`), then verify the backup
+with `PRAGMA integrity_check`. Do not copy only the `.sqlite` file while the API is running:
+committed pages may still be in `-wal`, so such a copy can omit recent data or be inconsistent.
+See [Deployment and operations](docs/deployment.md#sqlite-backup-and-restore) for a tested
+backup and restore procedure.
 
 ### Migration caveat: case-folded name keys
 
