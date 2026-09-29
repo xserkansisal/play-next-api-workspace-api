@@ -41,9 +41,19 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `HOST`     | `0.0.0.0`     | Bind address; use `127.0.0.1` behind a same-host reverse proxy |
 | `PORT`     | `3000`        | Integer 0–65535                        |
 | `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
-| `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; not needed for same-origin nginx proxying; no credentials are enabled |
+| `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; credentialed requests are allowed only from that origin; not needed for same-origin nginx proxying |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
+| `AUTH_CODE_PEPPER` | development-only placeholder | HMAC secret, at least 32 characters; must be explicitly set in production |
+| `AUTH_CODE_TTL_SECONDS` | `900` | Sign-in code lifetime (15 minutes by default; range 60–3600) |
+| `AUTH_CODE_MAX_ATTEMPTS` | `5` | Wrong attempts allowed per code before it is invalidated |
+| `AUTH_CODE_REQUEST_LIMIT` / `AUTH_CODE_REQUEST_WINDOW_SECONDS` | `3` / `900` | Code requests allowed per normalized email per window |
+| `AUTH_CODE_VERIFY_LIMIT` / `AUTH_CODE_VERIFY_WINDOW_SECONDS` | `10` / `900` | Verification requests allowed per normalized email per window |
+| `AUTH_SESSION_TTL_SECONDS` | `2592000` | Server-side session lifetime (one month by default) |
+| `AUTH_COOKIE_NAME` | `play_next_session` | Session cookie name |
+| `AUTH_COOKIE_SECURE` | `false` | Adds the cookie's `Secure` attribute when enabled; keep false only for the current HTTP-only internal deployment |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; username and password must be set together |
+| `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the loopback-only `/api/v1/auth/dev-inbox` development helper; never set in production |
 
 ## Persistence
 
@@ -64,6 +74,10 @@ folder names (request names may repeat), and case-insensitive unique active envi
 
 | Method | Route | Description |
 | ------ | ----- | ----------- |
+| POST | `/api/v1/auth/request-code` | Request a sign-in code by email |
+| POST | `/api/v1/auth/verify-code` | Verify a code and issue the session cookie |
+| GET | `/api/v1/auth/me` | Read the current signed-in user |
+| POST | `/api/v1/auth/sign-out` | Revoke the current server-side session |
 | GET | `/api/v1/collections` | Active collections (metadata) |
 | POST | `/api/v1/collections` | Create a collection, optionally with a nested `items` tree (atomic) |
 | GET | `/api/v1/collections/:id` | Collection with its active item tree |
@@ -84,10 +98,46 @@ There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
 
+## Email code sign-in
+
+Only `fluttersea.com`, `sisal.com`, and `sisal.it` addresses can request a six-digit code.
+Codes expire after 15 minutes by default, are stored only as peppered HMAC hashes, are
+single-use, and are invalidated after five failed attempts. Code requests and verification
+attempts are rate-limited independently per normalized email. Responses do not disclose whether
+an eligible address already has an account. There is no per-IP rate limit; the API does not
+trust forwarded client-IP headers from nginx.
+
+`POST /api/v1/auth/request-code` accepts `{ "email": "..." }` and returns `202`. Verify with
+`POST /api/v1/auth/verify-code` and `{ "email": "...", "code": "123456" }`; successful
+verification sets an `HttpOnly`, `SameSite=Lax` session cookie. `GET /api/v1/auth/me` returns
+the signed-in user and `POST /api/v1/auth/sign-out` revokes the server-side session. All
+collections, items, environments, Trash, and SSE routes require that cookie. Browser
+`EventSource` connections use cookies; the Vite development origin must be allowed through
+`CORS_ORIGIN` and its client must enable credentials. Credentialed CORS is enabled only for the
+exact configured origin.
+
+SMTP host, port, TLS mode, credentials and sender address are configurable; production requires
+`SMTP_HOST` and `SMTP_FROM`, and accepts SMTP authentication only when both user and password are
+provided. SMTP delivery has not been verified against the organization's server. Development and
+tests use an in-memory sender that does not send or log mail. For local development only, set a
+long random `AUTH_DEV_INBOX_TOKEN` to expose the latest unexpired code at
+`GET /api/v1/auth/dev-inbox?email=...`, with the token in `X-Dev-Inbox-Token`; the route is
+loopback-only and is not registered in production.
+
+Sessions are stored as token hashes and can be revoked server-side. Cookie `Secure` defaults to
+false because the current internal deployment deliberately uses plain HTTP; this means sign-in
+codes and session cookies are not protected from network observation. Keep the service strictly
+on the trusted internal network and revisit TLS and `AUTH_COOKIE_SECURE=true` before any broader
+exposure. Authenticated writes record creator and last updater emails for collections, items, and
+environments. Existing pre-auth rows keep `NULL` attribution rather than being assigned a
+fabricated user. This is attribution only: signed-in users share and can edit all data.
+
 ## Live change notifications (SSE)
 
 `GET /api/v1/events` (`text/event-stream`) tells clients *that* something changed so they can
-refetch it; it never carries data. A frame is emitted only after a create, update, move to
+refetch it; it never carries data. Like every collection, environment and Trash route, it
+requires the session cookie; browser `EventSource` sends the cookie automatically for a
+same-origin connection. A frame is emitted only after a create, update, move to
 Trash or restore of a collection, folder, request or environment has been **committed**. Reads,
 restore checks and failed writes (4xx/5xx) emit nothing.
 
@@ -139,10 +189,10 @@ the application default is `0.0.0.0`. Verify the actual listener is loopback-onl
 with `ss -ltnp`) and that the nginx upstream targets that address and the configured `PORT`.
 Do not expose the API port to other network hosts.
 
-The API does not currently enable Express proxy trust or consume forwarded client-IP headers.
-Behind nginx, the remote address visible to the API is nginx's address. Before Slice 7 email
-sign-in and per-IP rate limiting, explicitly design and implement trusted proxy/client-IP
-handling; otherwise the limiter could treat all users as nginx and throttle them together.
+The API does not enable Express proxy trust or consume forwarded client-IP headers. Behind nginx,
+the remote address visible to the API is nginx's address. No per-IP rate limit is implemented;
+before adding one, explicitly design trusted proxy/client-IP handling, or the limiter could treat
+all users as nginx and throttle them together.
 
 Nginx must disable response buffering and allow a long read timeout for `/api` SSE responses.
 If live updates fail while ordinary API requests and health checks still work, check nginx's

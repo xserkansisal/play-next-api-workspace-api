@@ -213,7 +213,7 @@ export interface RestoreOutcome {
 }
 
 /** Restores a Trash root and its whole subtree atomically, applying name overrides. */
-export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInput): RestoreOutcome {
+export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInput, actorId: string): RestoreOutcome {
   return db.transaction(
     (tx) => {
       const root = findTrashRoot(tx, id);
@@ -228,7 +228,10 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
       for (const row of restoreRows) {
         const name = overrides.get(row.id);
         if (name !== undefined && name !== row.name) {
-          tx.update(items).set({ name, nameKey: nameKey(name), updatedAt: timestamp }).where(eq(items.id, row.id)).run();
+          tx.update(items)
+            .set({ name, nameKey: nameKey(name), updatedAt: timestamp, updatedBy: actorId })
+            .where(eq(items.id, row.id))
+            .run();
         }
       }
 
@@ -237,8 +240,10 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
         tx.update(environments)
           .set({
             deletedAt: null,
+            updatedAt: timestamp,
+            updatedBy: actorId,
             ...(name !== undefined && name !== root.row.name
-              ? { name, nameKey: nameKey(name), updatedAt: timestamp }
+              ? { name, nameKey: nameKey(name) }
               : {}),
           })
           .where(eq(environments.id, id))
@@ -251,8 +256,10 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
         tx.update(collections)
           .set({
             deletedAt: null,
+            updatedAt: timestamp,
+            updatedBy: actorId,
             ...(name !== undefined && name !== root.row.name
-              ? { name, nameKey: nameKey(name), updatedAt: timestamp }
+              ? { name, nameKey: nameKey(name) }
               : {}),
           })
           .where(eq(collections.id, id))
@@ -262,7 +269,7 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
       const ids = restoreRows.map((r) => r.id);
       for (let i = 0; i < ids.length; i += 500) {
         tx.update(items)
-          .set({ deletedAt: null, trashRootId: null })
+          .set({ deletedAt: null, trashRootId: null, updatedAt: timestamp, updatedBy: actorId })
           .where(and(inArray(items.id, ids.slice(i, i + 500)), isNotNull(items.deletedAt)))
           .run();
       }
@@ -275,4 +282,3 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
     { behavior: "immediate" },
   );
 }
-

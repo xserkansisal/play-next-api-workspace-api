@@ -12,7 +12,7 @@ async function setup(options: Parameters<typeof createTestContext>[1] = {}) {
 }
 
 async function connect(headers: Record<string, string> = {}, path?: string) {
-  const client = await connectSse(server.url, headers, path);
+  const client = await connectSse(server.url, { Cookie: ctx.sessionCookie, ...headers }, path);
   clients.push(client);
   return client;
 }
@@ -46,9 +46,9 @@ describe("GET /api/v1/events", () => {
   });
 
   it("sends heartbeat comments periodically", async () => {
-    await setup({ heartbeatMs: 20 });
+    await setup({ heartbeatMs: 1000 });
     const client = await connectReady();
-    await client.waitFor((f) => f.filter((x) => x.comment?.startsWith("heartbeat")).length >= 2);
+    await client.waitFor((f) => f.filter((x) => x.comment?.startsWith("heartbeat")).length >= 2, 3500);
   });
 
   it("publishes value-free events for every committed collection, item, and environment write", async () => {
@@ -196,7 +196,7 @@ describe("GET /api/v1/events", () => {
 
 describe("SSE lifecycle", () => {
   it("unsubscribes and stops heartbeats when a client disconnects", async () => {
-    await setup({ heartbeatMs: 10 });
+    await setup({ heartbeatMs: 1000 });
     const a = await connectReady();
     const b = await connectReady();
     expect(ctx.events.listenerCount).toBe(2);

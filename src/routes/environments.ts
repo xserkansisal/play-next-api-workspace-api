@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
+import { authenticatedUserId } from "../middleware/authenticate.js";
 import {
   createEnvironment,
   listEnvironments,
@@ -18,7 +19,7 @@ export function createEnvironmentsRouter(db: AppDatabase, events: ChangeEventHub
   });
 
   router.post("/", (req, res) => {
-    const environment = createEnvironment(db, environmentInputSchema.parse(req.body));
+    const environment = createEnvironment(db, environmentInputSchema.parse(req.body), authenticatedUserId(req));
     events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
     res.status(201).json(environment);
   });
@@ -28,13 +29,13 @@ export function createEnvironmentsRouter(db: AppDatabase, events: ChangeEventHub
   });
 
   router.put("/:environmentId", (req, res) => {
-    const environment = updateEnvironment(db, req.params.environmentId, environmentInputSchema.parse(req.body));
+    const environment = updateEnvironment(db, req.params.environmentId, environmentInputSchema.parse(req.body), authenticatedUserId(req));
     events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
     res.json(environment);
   });
 
   router.delete("/:environmentId", (req, res) => {
-    const trashed = trashEnvironment(db, req.params.environmentId);
+    const trashed = trashEnvironment(db, req.params.environmentId, authenticatedUserId(req));
     events.publish({ kind: "environment", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
     res.status(204).end();
   });

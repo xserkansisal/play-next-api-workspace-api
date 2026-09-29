@@ -13,9 +13,11 @@ other machines. The API's `HOST` setting is configurable; while the application 
 (for example, `ss -ltnp`) and verify nginx's upstream points to that same local address and
 configured port. Do not open the API port to the network.
 
-TLS is intentionally not used for this scoped internal deployment, which has no credentials in
-transit. Revisit this decision before adding sign-in or exposing either service beyond the
-internal network.
+TLS is intentionally not used for this scoped internal deployment. With email sign-in, codes and
+session cookies travel over plain HTTP and are observable to anyone able to capture internal
+network traffic; this is a deliberate but security-relevant tradeoff, not protection for
+credentials in transit. Keep the services internal-only and revisit TLS plus
+`AUTH_COOKIE_SECURE=true` before any exposure beyond the internal network.
 
 Requirements:
 
@@ -46,9 +48,12 @@ and filesystem layout are not prescribed here. Create the directory before migra
 ## Configure environment and migrate
 
 Export the production settings in the shell or service-management environment used to invoke
-PM2. The ecosystem file requires `PORT` and `DATABASE_PATH`; it defaults `HOST` to `127.0.0.1`,
-`SSE_HEARTBEAT_MS` to `15000`, and `SSE_RETRY_MS` to `3000`. Set `CORS_ORIGIN` only if direct
-browser access or Vite development requires it.
+PM2. The ecosystem file requires `PORT`, `DATABASE_PATH`, and `AUTH_CODE_PEPPER`; production
+environment validation also requires `SMTP_HOST` and `SMTP_FROM`. It defaults `HOST` to
+`127.0.0.1`, `SSE_HEARTBEAT_MS` to `15000`, `SSE_RETRY_MS` to `3000`, the code lifetime to
+900 seconds, the code-attempt limit to 5, request/verify rate limits to 3/10 per 900 seconds,
+session lifetime to 2,592,000 seconds, and cookie Secure to false. Set `CORS_ORIGIN` only for
+direct browser access or Vite development; credentialed CORS is restricted to that exact origin.
 
 ```sh
 export NODE_ENV=production
@@ -59,12 +64,50 @@ export DATABASE_PATH=/persistent/path/api.sqlite  # choose a persistent path out
 # export CORS_ORIGIN=http://localhost:5173
 export SSE_HEARTBEAT_MS=15000
 export SSE_RETRY_MS=3000
+export AUTH_CODE_PEPPER='use-a-unique-random-secret-of-at-least-32-characters'
+export AUTH_CODE_TTL_SECONDS=900
+export AUTH_CODE_MAX_ATTEMPTS=5
+export AUTH_CODE_REQUEST_LIMIT=3
+export AUTH_CODE_REQUEST_WINDOW_SECONDS=900
+export AUTH_CODE_VERIFY_LIMIT=10
+export AUTH_CODE_VERIFY_WINDOW_SECONDS=900
+export AUTH_SESSION_TTL_SECONDS=2592000
+export AUTH_COOKIE_NAME=play_next_session
+export AUTH_COOKIE_SECURE=false
+export SMTP_HOST=smtp.internal.example
+export SMTP_PORT=587
+export SMTP_SECURE=false
+# Set both or neither:
+export SMTP_USER=
+export SMTP_PASSWORD=
+export SMTP_FROM=play-next@example.internal
 ```
 
 The sample values are not machine-specific configuration; choose an unused port and persistent
 path for the VM. The web browser uses nginx's origin; nginx's `/api` upstream uses the loopback
 API address and port. The API's CORS middleware permits only the exact configured origin and
-does not enable credentialed requests.
+enables credentials for that origin only. Do not set `CORS_ORIGIN` for the normal same-origin
+nginx deployment.
+
+The SMTP settings above are examples, not verified organizational settings. Production requires
+`SMTP_HOST` and `SMTP_FROM`; `SMTP_USER` and `SMTP_PASSWORD` must be supplied together when the
+relay requires authentication. Do not place secrets in checked-in files or command history.
+
+Sign-in codes are six digits, single-use, hashed with `AUTH_CODE_PEPPER`, valid for 15 minutes
+by default, and invalidated after five failed attempts. Request and verification limits are
+configured per normalized email, not per IP. The application does not trust `X-Forwarded-For`.
+Sessions last one month by default, are revocable server-side, and are issued in
+`HttpOnly; SameSite=Lax` cookies. `AUTH_COOKIE_SECURE=false` is necessary for the current
+plain-HTTP deployment; setting it true before HTTPS would prevent browsers from sending the
+cookie. Because this deployment has no TLS, sign-in codes and session cookies are visible to
+network observers on the internal network. Do not extend access beyond that network without
+revisiting TLS.
+
+In development/tests the default sender holds the latest code in memory and never sends/logs it.
+For local manual development, optionally set `AUTH_DEV_INBOX_TOKEN` to a random value of at
+least 32 characters; the development-only loopback route
+`GET /api/v1/auth/dev-inbox?email=...` reveals the current code only when the token is supplied
+in `X-Dev-Inbox-Token`. Never enable this in production.
 
 Before upgrading a populated database, stop the API and take a verified backup using the
 procedure below. Run the read-only name-key preflight:
@@ -141,12 +184,10 @@ responses by default; incorrect buffering or a short read timeout is the most li
 live updates stop while API health checks continue to pass. Treat this as a proxy issue first
 when ordinary API calls work but SSE notifications do not arrive.
 
-The API currently does not trust proxy headers or resolve the original client address from
-`X-Forwarded-For`. Behind nginx, it sees nginx's address as the peer. This is a known
-consideration to resolve before Slice 7 email sign-in: planned per-IP rate limiting would
-otherwise see every request as coming from nginx and could throttle all users together.
-Design a trusted-proxy boundary and client-IP policy before implementing that limiter; do not
-blindly trust arbitrary forwarded headers.
+The API does not trust proxy headers or resolve the original client address from
+`X-Forwarded-For`. Behind nginx, it sees nginx's address as the peer. Per-IP rate limiting is
+not implemented; if added, first design a trusted-proxy boundary and client-IP policy. Blindly
+trusting arbitrary forwarded headers could let clients spoof their source address.
 
 ## SQLite backup and restore
 

@@ -3,7 +3,7 @@ import type { AppDatabase } from "../db/client.js";
 import { collections, items } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { CreateCollectionInput, UpdateCollectionInput } from "../validation/schemas.js";
-import { compareByName, nameKey, newId, nowIso } from "./common.js";
+import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
 import { insertTree, loadActiveTree, type DbExecutor, type ItemNode } from "./tree.js";
 
 export interface CollectionSummary {
@@ -12,6 +12,8 @@ export interface CollectionSummary {
   description: string;
   createdAt: string;
   updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
 }
 
 export interface CollectionAggregate extends CollectionSummary {
@@ -20,13 +22,14 @@ export interface CollectionAggregate extends CollectionSummary {
 
 type CollectionRow = typeof collections.$inferSelect;
 
-function toSummary(row: CollectionRow): CollectionSummary {
+function toSummary(db: DbExecutor, row: CollectionRow): CollectionSummary {
   return {
     id: row.id,
     name: row.name,
     description: row.description,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...resolveAttribution(db, row.createdBy, row.updatedBy),
   };
 }
 
@@ -66,16 +69,16 @@ export function listCollections(db: AppDatabase): CollectionSummary[] {
     .from(collections)
     .where(isNull(collections.deletedAt))
     .all()
-    .map(toSummary)
+    .map((row) => toSummary(db, row))
     .sort(compareByName);
 }
 
 export function readCollection(db: DbExecutor, id: string): CollectionAggregate {
   const row = requireActiveCollection(db, id);
-  return { ...toSummary(row), items: loadActiveTree(db, id).roots };
+  return { ...toSummary(db, row), items: loadActiveTree(db, id).roots };
 }
 
-export function createCollection(db: AppDatabase, input: CreateCollectionInput): CollectionAggregate {
+export function createCollection(db: AppDatabase, input: CreateCollectionInput, actorId: string): CollectionAggregate {
   return db.transaction(
     (tx) => {
       const existing = findActiveCollectionByName(tx, input.name);
@@ -91,9 +94,11 @@ export function createCollection(db: AppDatabase, input: CreateCollectionInput):
           description: input.description,
           createdAt: timestamp,
           updatedAt: timestamp,
+          createdBy: actorId,
+          updatedBy: actorId,
         })
         .run();
-      insertTree(tx, id, null, input.items, timestamp);
+      insertTree(tx, id, null, input.items, timestamp, actorId);
       return readCollection(tx, id);
     },
     { behavior: "immediate" },
@@ -101,7 +106,7 @@ export function createCollection(db: AppDatabase, input: CreateCollectionInput):
 }
 
 /** Saves collection-level metadata only; the item tree is never touched. */
-export function updateCollection(db: AppDatabase, id: string, input: UpdateCollectionInput): CollectionSummary {
+export function updateCollection(db: AppDatabase, id: string, input: UpdateCollectionInput, actorId: string): CollectionSummary {
   return db.transaction(
     (tx) => {
       requireActiveCollection(tx, id);
@@ -109,26 +114,32 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
       tx.update(collections)
-        .set({ name: input.name, nameKey: nameKey(input.name), description: input.description, updatedAt: nowIso() })
+        .set({
+          name: input.name,
+          nameKey: nameKey(input.name),
+          description: input.description,
+          updatedAt: nowIso(),
+          updatedBy: actorId,
+        })
         .where(eq(collections.id, id))
         .run();
-      return toSummary(requireActiveCollection(tx, id));
+      return toSummary(tx, requireActiveCollection(tx, id));
     },
     { behavior: "immediate" },
   );
 }
 
 /** Moves a collection and all of its active items to Trash as one restorable root. */
-export function trashCollection(db: AppDatabase, id: string): { id: string; deletedAt: string } {
+export function trashCollection(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {
   return db.transaction(
     (tx) => {
       requireActiveCollection(tx, id);
       const timestamp = nowIso();
       tx.update(items)
-        .set({ deletedAt: timestamp, trashRootId: id })
+        .set({ deletedAt: timestamp, trashRootId: id, updatedAt: timestamp, updatedBy: actorId })
         .where(and(eq(items.collectionId, id), isNull(items.deletedAt)))
         .run();
-      tx.update(collections).set({ deletedAt: timestamp }).where(eq(collections.id, id)).run();
+      tx.update(collections).set({ deletedAt: timestamp, updatedAt: timestamp, updatedBy: actorId }).where(eq(collections.id, id)).run();
       return { id, deletedAt: timestamp };
     },
     { behavior: "immediate" },

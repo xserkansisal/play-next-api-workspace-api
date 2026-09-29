@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEvent, ChangeEventHub } from "../events/hub.js";
+import { authenticatedUserId } from "../middleware/authenticate.js";
 import { checkRestore, listTrash, restoreFromTrash, type RestoredResource } from "../services/trash.js";
 import { restoreSchema } from "../validation/schemas.js";
 
@@ -27,7 +28,12 @@ export function createTrashRouter(db: AppDatabase, events: ChangeEventHub): Rout
   });
 
   router.post("/:id/restore", (req, res) => {
-    const { resource, restoredAt } = restoreFromTrash(db, req.params.id, restoreSchema.parse(req.body ?? {}));
+    const { resource, restoredAt } = restoreFromTrash(
+      db,
+      req.params.id,
+      restoreSchema.parse(req.body ?? {}),
+      authenticatedUserId(req),
+    );
     events.publish({ ...restoredEventTarget(resource), operation: "restored", changedAt: restoredAt });
     res.json(resource);
   });

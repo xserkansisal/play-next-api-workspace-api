@@ -15,6 +15,50 @@ import {
 // case-insensitive uniqueness. `trash_root_id` identifies the Trash root a soft-deleted
 // row was moved with, so a whole subtree can be restored together.
 
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const authCodes = sqliteTable(
+  "auth_codes",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    consumedAt: text("consumed_at"),
+  },
+  (t) => [index("auth_codes_email_created_idx").on(t.email, t.createdAt)],
+);
+
+export const authSessions = sqliteTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    revokedAt: text("revoked_at"),
+  },
+  (t) => [index("auth_sessions_user_idx").on(t.userId), index("auth_sessions_expiry_idx").on(t.expiresAt)],
+);
+
+export const authRateLimits = sqliteTable(
+  "auth_rate_limits",
+  {
+    email: text("email").notNull(),
+    purpose: text("purpose", { enum: ["request_code", "verify_code"] }).notNull(),
+    windowStartedAt: text("window_started_at").notNull(),
+    attempts: integer("attempts").notNull(),
+  },
+  (t) => [primaryKey({ name: "auth_rate_limits_pk", columns: [t.email, t.purpose] })],
+);
+
 export const collections = sqliteTable(
   "collections",
   {
@@ -25,6 +69,8 @@ export const collections = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     deletedAt: text("deleted_at"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
   },
   (t) => [
     uniqueIndex("collections_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
@@ -51,6 +97,8 @@ export const items = sqliteTable(
     updatedAt: text("updated_at").notNull(),
     deletedAt: text("deleted_at"),
     trashRootId: text("trash_root_id"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
   },
   (t) => [
     check("items_kind_check", sql`"kind" IN ('folder', 'request')`),
@@ -126,6 +174,8 @@ export const environments = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
     deletedAt: text("deleted_at"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
   },
   (t) => [
     uniqueIndex("environments_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),

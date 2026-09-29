@@ -3,7 +3,7 @@ import type { AppDatabase } from "../db/client.js";
 import { environments, environmentVariables } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { EnvironmentInput } from "../validation/schemas.js";
-import { compareByName, nameKey, newId, nowIso } from "./common.js";
+import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
 import type { DbExecutor } from "./tree.js";
 
 export interface EnvironmentVariable {
@@ -18,6 +18,8 @@ export interface Environment {
   variables: EnvironmentVariable[];
   createdAt: string;
   updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
 }
 
 type EnvironmentRow = typeof environments.$inferSelect;
@@ -44,6 +46,7 @@ function hydrate(db: DbExecutor, rows: EnvironmentRow[]): Environment[] {
     variables: variables.get(row.id) ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...resolveAttribution(db, row.createdBy, row.updatedBy),
   }));
 }
 
@@ -96,7 +99,7 @@ export function readEnvironment(db: DbExecutor, id: string): Environment {
   return env!;
 }
 
-export function createEnvironment(db: AppDatabase, input: EnvironmentInput): Environment {
+export function createEnvironment(db: AppDatabase, input: EnvironmentInput, actorId: string): Environment {
   return db.transaction(
     (tx) => {
       const existing = findActiveEnvironmentByName(tx, input.name);
@@ -105,7 +108,15 @@ export function createEnvironment(db: AppDatabase, input: EnvironmentInput): Env
       const id = newId();
       const timestamp = nowIso();
       tx.insert(environments)
-        .values({ id, name: input.name, nameKey: nameKey(input.name), createdAt: timestamp, updatedAt: timestamp })
+        .values({
+          id,
+          name: input.name,
+          nameKey: nameKey(input.name),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          createdBy: actorId,
+          updatedBy: actorId,
+        })
         .run();
       writeVariables(tx, id, input.variables);
       return readEnvironment(tx, id);
@@ -115,7 +126,7 @@ export function createEnvironment(db: AppDatabase, input: EnvironmentInput): Env
 }
 
 /** Explicit save: replaces the environment's name and full variable list (last save wins). */
-export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput): Environment {
+export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput, actorId: string): Environment {
   return db.transaction(
     (tx) => {
       requireActive(tx, id);
@@ -123,7 +134,7 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
       if (existing) throw environmentNameConflictError(input.name, existing.id);
 
       tx.update(environments)
-        .set({ name: input.name, nameKey: nameKey(input.name), updatedAt: nowIso() })
+        .set({ name: input.name, nameKey: nameKey(input.name), updatedAt: nowIso(), updatedBy: actorId })
         .where(eq(environments.id, id))
         .run();
       writeVariables(tx, id, input.variables);
@@ -133,12 +144,12 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
   );
 }
 
-export function trashEnvironment(db: AppDatabase, id: string): { id: string; deletedAt: string } {
+export function trashEnvironment(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {
   return db.transaction(
     (tx) => {
       requireActive(tx, id);
       const deletedAt = nowIso();
-      tx.update(environments).set({ deletedAt }).where(eq(environments.id, id)).run();
+      tx.update(environments).set({ deletedAt, updatedAt: deletedAt, updatedBy: actorId }).where(eq(environments.id, id)).run();
       return { id, deletedAt };
     },
     { behavior: "immediate" },

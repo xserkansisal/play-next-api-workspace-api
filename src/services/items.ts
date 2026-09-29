@@ -29,7 +29,7 @@ function requireActiveItem(db: DbExecutor, collectionId: string, itemId: string)
   return row;
 }
 
-export function createItem(db: AppDatabase, collectionId: string, input: CreateItemInput): ItemNode {
+export function createItem(db: AppDatabase, collectionId: string, input: CreateItemInput, actorId: string): ItemNode {
   return db.transaction(
     (tx) => {
       requireActiveCollection(tx, collectionId);
@@ -61,6 +61,8 @@ export function createItem(db: AppDatabase, collectionId: string, input: CreateI
           description: input.description,
           createdAt: timestamp,
           updatedAt: timestamp,
+          createdBy: actorId,
+          updatedBy: actorId,
         })
         .run();
       if (input.type === "request") writeRequestDetails(tx, id, input, true);
@@ -71,7 +73,13 @@ export function createItem(db: AppDatabase, collectionId: string, input: CreateI
 }
 
 /** Saves one folder's or request's own fields; parent, children, and siblings are untouched. */
-export function updateItem(db: AppDatabase, collectionId: string, itemId: string, input: UpdateItemInput): ItemNode {
+export function updateItem(
+  db: AppDatabase,
+  collectionId: string,
+  itemId: string,
+  input: UpdateItemInput,
+  actorId: string,
+): ItemNode {
   return db.transaction(
     (tx) => {
       requireActiveCollection(tx, collectionId);
@@ -88,7 +96,13 @@ export function updateItem(db: AppDatabase, collectionId: string, itemId: string
       }
 
       tx.update(items)
-        .set({ name: input.name, nameKey: nameKey(input.name), description: input.description, updatedAt: nowIso() })
+        .set({
+          name: input.name,
+          nameKey: nameKey(input.name),
+          description: input.description,
+          updatedAt: nowIso(),
+          updatedBy: actorId,
+        })
         .where(eq(items.id, itemId))
         .run();
       if (input.type === "request") writeRequestDetails(tx, itemId, input, false);
@@ -106,7 +120,7 @@ export interface TrashedItem {
   deletedAt: string;
 }
 
-export function trashItem(db: AppDatabase, collectionId: string, itemId: string): TrashedItem {
+export function trashItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): TrashedItem {
   return db.transaction(
     (tx) => {
       requireActiveCollection(tx, collectionId);
@@ -115,7 +129,7 @@ export function trashItem(db: AppDatabase, collectionId: string, itemId: string)
       const timestamp = nowIso();
       for (let i = 0; i < ids.length; i += 500) {
         tx.update(items)
-          .set({ deletedAt: timestamp, trashRootId: itemId })
+          .set({ deletedAt: timestamp, trashRootId: itemId, updatedAt: timestamp, updatedBy: actorId })
           .where(inArray(items.id, ids.slice(i, i + 500)))
           .run();
       }

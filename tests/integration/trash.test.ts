@@ -186,7 +186,11 @@ describe("Trash API", () => {
     const env = (await ctx.api.post("/api/v1/environments").send({ name: "E", variables: [{ key: "k", value: "v" }] }).expect(201)).body;
     await ctx.api.delete(`/api/v1/environments/${env.id}`).expect(204);
     const restored = await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(200);
-    expect(restored.body).toEqual({ kind: "environment", environment: env });
+    expect(restored.body).toMatchObject({
+      kind: "environment",
+      environment: { id: env.id, name: env.name, createdBy: env.createdBy, updatedBy: "test@sisal.com" },
+    });
+    expect(Date.parse(restored.body.environment.updatedAt)).toBeGreaterThan(Date.parse(env.updatedAt));
     await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(404);
 
     const col = await createCollection({ name: "C", items: [{ type: "folder", name: "F" }] });

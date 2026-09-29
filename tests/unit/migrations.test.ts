@@ -25,4 +25,28 @@ describe("0001_environment_name_unique migration", () => {
       sqlite.close();
     }
   });
+
+  describe("0002_slice7_auth_attribution migration", () => {
+    it("preserves pre-auth rows with NULL attribution rather than inventing a user", () => {
+      const sqlite = new Database(":memory:");
+      try {
+        sqlite.pragma("foreign_keys = ON");
+        for (const stmt of statements("0000_init.sql")) sqlite.exec(stmt);
+        for (const stmt of statements("0001_environment_name_unique.sql")) sqlite.exec(stmt);
+        sqlite
+          .prepare(
+            "INSERT INTO collections (id, name, name_key, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+          )
+          .run("legacy", "Legacy", "legacy", "", "t", "t");
+        for (const stmt of statements("0002_slice7_auth_attribution.sql")) sqlite.exec(stmt);
+        const row = sqlite.prepare("SELECT created_by, updated_by FROM collections WHERE id = 'legacy'").get() as {
+          created_by: string | null;
+          updated_by: string | null;
+        };
+        expect(row).toEqual({ created_by: null, updated_by: null });
+      } finally {
+        sqlite.close();
+      }
+    });
+  });
 });

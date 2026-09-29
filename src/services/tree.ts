@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { RunResult } from "better-sqlite3";
 import * as schema from "../db/schema.js";
-import { items, requestDetails, requestHeaders, requestQueryParams } from "../db/schema.js";
+import { items, requestDetails, requestHeaders, requestQueryParams, users } from "../db/schema.js";
 import { ConflictError } from "../errors.js";
 import type { RequestItemFields, TreeNodeInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId } from "./common.js";
@@ -24,6 +24,8 @@ interface NodeBase {
   description: string;
   createdAt: string;
   updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
 }
 
 export interface FolderNode extends NodeBase {
@@ -73,6 +75,17 @@ function buildNodes(db: DbExecutor, rows: ItemRow[]): Map<string, ItemNode> {
   const details = new Map<string, typeof requestDetails.$inferSelect>();
   const params = new Map<string, KeyValueRow[]>();
   const headers = new Map<string, KeyValueRow[]>();
+  const userIds = [...new Set(rows.flatMap((row) => [row.createdBy, row.updatedBy]).filter((id): id is string => id !== null))];
+  const userEmails = new Map(
+    userIds.length === 0
+      ? []
+      : db
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(inArray(users.id, userIds))
+          .all()
+          .map((user) => [user.id, user.email] as const),
+  );
 
   for (const chunk of chunks(requestIds, 500)) {
     for (const d of db.select().from(requestDetails).where(inArray(requestDetails.itemId, chunk)).all()) {
@@ -106,6 +119,8 @@ function buildNodes(db: DbExecutor, rows: ItemRow[]): Map<string, ItemNode> {
       description: row.description,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      createdBy: row.createdBy ? userEmails.get(row.createdBy) ?? null : null,
+      updatedBy: row.updatedBy ? userEmails.get(row.updatedBy) ?? null : null,
     };
     if (row.kind === "folder") {
       nodes.set(row.id, { ...base, type: "folder", items: [] });
@@ -204,6 +219,7 @@ export function insertTree(
   parentId: string | null,
   nodes: TreeNodeInput[],
   timestamp: string,
+  actorId: string,
 ): void {
   const seenFolders = new Map<string, string>();
   for (const node of nodes) {
@@ -225,10 +241,12 @@ export function insertTree(
         description: node.description,
         createdAt: timestamp,
         updatedAt: timestamp,
+        createdBy: actorId,
+        updatedBy: actorId,
       })
       .run();
     if (node.type === "request") writeRequestDetails(db, id, node, true);
-    else insertTree(db, collectionId, id, node.items, timestamp);
+    else insertTree(db, collectionId, id, node.items, timestamp, actorId);
   }
 }
 
