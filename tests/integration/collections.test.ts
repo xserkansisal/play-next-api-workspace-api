@@ -57,6 +57,24 @@ describe("collections API", () => {
     expect(orders.items[0].items[0]).toMatchObject({ name: "Old", parentId: orders.items[0].id });
   });
 
+  it("accepts an atomic nested collection import larger than 5 MiB", async () => {
+    const content = "x".repeat(900_000);
+    const items = Array.from({ length: 6 }, (_, index) => ({
+      type: "request" as const,
+      name: `Large request ${index}`,
+      ...requestFields,
+      body: { type: "json" as const, content },
+    }));
+    const response = await ctx.api
+      .post("/api/v1/collections")
+      .send({ name: "Large import", items })
+      .expect(201);
+
+    expect(response.body.items).toHaveLength(6);
+    expect(response.body.items.every((item: { body: { content: string } }) => item.body.content.length === content.length)).toBe(true);
+    expect(ctx.db.$client.prepare("SELECT count(*) AS count FROM collections").get()).toEqual({ count: 1 });
+  });
+
   it("rejects case-insensitive duplicate active collection names but allows reuse after Trash", async () => {
     const first = await ctx.api.post("/api/v1/collections").send({ name: "Orders" }).expect(201);
     const dup = await ctx.api.post("/api/v1/collections").send({ name: "ORDERS" }).expect(409);

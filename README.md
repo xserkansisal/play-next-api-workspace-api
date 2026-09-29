@@ -55,6 +55,11 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; username and password must be set together |
 | `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the loopback-only `/api/v1/auth/dev-inbox` development helper; never set in production |
 
+JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
+collection imports. Each individual request body's `content` is still limited to 1,000,000
+characters, and tree depth to 32; collection imports can contain many requests within those
+per-item limits.
+
 ## Persistence
 
 Shared data is stored in SQLite via [Drizzle ORM](https://orm.drizzle.team/) and the

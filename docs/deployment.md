@@ -31,6 +31,11 @@ The repository's `engines` field allows Node >=22.12. `better-sqlite3` is pinned
 version 13.0.3 segfaulted on the development machine's Node 23.5 runtime. The package override
 for drizzle-kit's nested esbuild dependency is also intentional.
 
+The API accepts JSON request bodies up to 50 MiB (50 × 1024 × 1024 bytes), including atomic
+nested collection imports. This limit must be matched by any reverse proxy in front of the API.
+Individual request-body `content` remains limited to 1,000,000 characters, and imported folder
+trees may be at most 32 levels deep.
+
 ## Install and build
 
 From the checked-out release directory:
