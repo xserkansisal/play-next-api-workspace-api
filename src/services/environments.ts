@@ -1,9 +1,9 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { environments, environmentVariables } from "../db/schema.js";
-import { NotFoundError } from "../errors.js";
+import { ConflictError, NotFoundError } from "../errors.js";
 import type { EnvironmentInput } from "../validation/schemas.js";
-import { compareByName, newId, nowIso } from "./common.js";
+import { compareByName, nameKey, newId, nowIso } from "./common.js";
 import type { DbExecutor } from "./tree.js";
 
 export interface EnvironmentVariable {
@@ -61,6 +61,22 @@ function requireActive(db: DbExecutor, id: string): EnvironmentRow {
   return row;
 }
 
+export function findActiveEnvironmentByName(db: DbExecutor, name: string, excludeId?: string): EnvironmentRow | undefined {
+  return db
+    .select()
+    .from(environments)
+    .where(and(eq(environments.nameKey, nameKey(name)), isNull(environments.deletedAt)))
+    .all()
+    .find((row) => row.id !== excludeId);
+}
+
+export function environmentNameConflictError(name: string, existingId: string): ConflictError {
+  return new ConflictError(`An environment named "${name}" already exists`, "ENVIRONMENT_NAME_CONFLICT", {
+    name,
+    conflictingId: existingId,
+  });
+}
+
 function writeVariables(db: DbExecutor, environmentId: string, variables: EnvironmentInput["variables"]): void {
   db.delete(environmentVariables).where(eq(environmentVariables.environmentId, environmentId)).run();
   if (variables.length > 0) {
@@ -83,9 +99,14 @@ export function readEnvironment(db: DbExecutor, id: string): Environment {
 export function createEnvironment(db: AppDatabase, input: EnvironmentInput): Environment {
   return db.transaction(
     (tx) => {
+      const existing = findActiveEnvironmentByName(tx, input.name);
+      if (existing) throw environmentNameConflictError(input.name, existing.id);
+
       const id = newId();
       const timestamp = nowIso();
-      tx.insert(environments).values({ id, name: input.name, createdAt: timestamp, updatedAt: timestamp }).run();
+      tx.insert(environments)
+        .values({ id, name: input.name, nameKey: nameKey(input.name), createdAt: timestamp, updatedAt: timestamp })
+        .run();
       writeVariables(tx, id, input.variables);
       return readEnvironment(tx, id);
     },
@@ -98,7 +119,13 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
   return db.transaction(
     (tx) => {
       requireActive(tx, id);
-      tx.update(environments).set({ name: input.name, updatedAt: nowIso() }).where(eq(environments.id, id)).run();
+      const existing = findActiveEnvironmentByName(tx, input.name, id);
+      if (existing) throw environmentNameConflictError(input.name, existing.id);
+
+      tx.update(environments)
+        .set({ name: input.name, nameKey: nameKey(input.name), updatedAt: nowIso() })
+        .where(eq(environments.id, id))
+        .run();
       writeVariables(tx, id, input.variables);
       return readEnvironment(tx, id);
     },

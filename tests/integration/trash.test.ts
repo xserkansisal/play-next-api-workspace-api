@@ -158,6 +158,30 @@ describe("Trash API", () => {
     await ctx.api.post(`/api/v1/trash/${folder.id}/restore`).send({ unknown: 1 }).expect(400);
   });
 
+  it("checks environment name conflicts and restores with an override keyed by the environment ID", async () => {
+    const env = (await ctx.api.post("/api/v1/environments").send({ name: "Dev" }).expect(201)).body;
+    await ctx.api.delete(`/api/v1/environments/${env.id}`).expect(204);
+    const active = (await ctx.api.post("/api/v1/environments").send({ name: "DEV" }).expect(201)).body;
+
+    const check = await ctx.api.post(`/api/v1/trash/${env.id}/restore/check`).expect(200);
+    expect(check.body).toMatchObject({
+      kind: "environment",
+      canRestore: false,
+      conflicts: [{ id: env.id, kind: "environment", name: "Dev", conflictingId: active.id }],
+    });
+    const snapshot = tableSnapshot();
+    const rejected = await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(409);
+    expect(rejected.body.error.code).toBe("RESTORE_CONFLICT");
+    expect(tableSnapshot()).toEqual(snapshot);
+
+    await ctx.api.post(`/api/v1/trash/${env.id}/restore`).send({ collectionName: "X" }).expect(400);
+    const restored = await ctx.api
+      .post(`/api/v1/trash/${env.id}/restore`)
+      .send({ nameOverrides: { [env.id]: "Dev (old)" } })
+      .expect(200);
+    expect(restored.body).toMatchObject({ kind: "environment", environment: { id: env.id, name: "Dev (old)" } });
+  });
+
   it("restores environments and returns 404 for unknown or non-root ids", async () => {
     const env = (await ctx.api.post("/api/v1/environments").send({ name: "E", variables: [{ key: "k", value: "v" }] }).expect(201)).body;
     await ctx.api.delete(`/api/v1/environments/${env.id}`).expect(204);

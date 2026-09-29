@@ -116,6 +116,7 @@ export type UpdateCollectionInput = z.output<typeof updateCollectionSchema>;
 export const environmentVariableSchema = z.strictObject({
   key: z
     .string()
+    .trim()
     .min(1, "Variable key must not be empty")
     .max(MAX_NAME_LENGTH)
     .regex(/^[^\s{}]+$/, "Variable key must not contain whitespace or braces"),

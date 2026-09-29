@@ -63,12 +63,38 @@ describe("environments API", () => {
     expect(read.body).toEqual(env.body);
   });
 
-  it("allows case-variant variable keys and duplicate environment names", async () => {
-    await ctx.api.post("/api/v1/environments").send({ name: "Same" }).expect(201);
-    await ctx.api
+  it("requires active environment names to be unique case-insensitively", async () => {
+    const first = await ctx.api.post("/api/v1/environments").send({ name: "Staging" }).expect(201);
+    const dup = await ctx.api.post("/api/v1/environments").send({ name: "  STAGING " }).expect(409);
+    expect(dup.body.error).toMatchObject({ code: "ENVIRONMENT_NAME_CONFLICT", details: { conflictingId: first.body.id } });
+
+    const other = await ctx.api.post("/api/v1/environments").send({ name: "Prod" }).expect(201);
+    await ctx.api.put(`/api/v1/environments/${other.body.id}`).send({ name: "staging" }).expect(409);
+    expect((await ctx.api.get(`/api/v1/environments/${other.body.id}`)).body).toEqual(other.body);
+    await ctx.api.put(`/api/v1/environments/${first.body.id}`).send({ name: "STAGING" }).expect(200);
+
+    await ctx.api.delete(`/api/v1/environments/${first.body.id}`).expect(204);
+    await ctx.api.post("/api/v1/environments").send({ name: "staging" }).expect(201);
+  });
+
+  it("trims variable keys and treats them case-sensitively", async () => {
+    const res = await ctx.api
       .post("/api/v1/environments")
-      .send({ name: "Same", variables: [{ key: "a", value: "1" }, { key: "A", value: "2" }] })
+      .send({ name: "E", variables: [{ key: "  baseUrl  ", value: " keep " }, { key: "a", value: "1" }, { key: "A", value: "2" }] })
       .expect(201);
+    expect(res.body.variables.map((v: { key: string; value: string }) => [v.key, v.value])).toEqual([
+      ["baseUrl", " keep "],
+      ["a", "1"],
+      ["A", "2"],
+    ]);
+    const dup = await ctx.api
+      .post("/api/v1/environments")
+      .send({ name: "E2", variables: [{ key: "k", value: "1" }, { key: " k ", value: "2" }] })
+      .expect(400);
+    expect(dup.body.error.code).toBe("VALIDATION_ERROR");
+    await ctx.api.post("/api/v1/environments").send({ name: "E3", variables: [{ key: "   ", value: "1" }] }).expect(400);
+    await ctx.api.post("/api/v1/environments").send({ name: "E4", variables: [{ key: "a\tb", value: "1" }] }).expect(400);
+    await ctx.api.post("/api/v1/environments").send({ name: "E5", variables: [{ key: "a}", value: "1" }] }).expect(400);
   });
 
   it("moves an environment to Trash", async () => {

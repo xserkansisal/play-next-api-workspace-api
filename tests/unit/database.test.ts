@@ -38,6 +38,15 @@ describe("database schema constraints", () => {
     insertCollection("c3", "orders", now);
   });
 
+  it("enforces unique active environment names only among active rows", () => {
+    const insert = db.$client.prepare(
+      "INSERT INTO environments (id, name, name_key, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insert.run("e1", "Dev", "dev", now, now, null);
+    expect(() => insert.run("e2", "DEV", "dev", now, now, null)).toThrow(/UNIQUE/);
+    insert.run("e3", "dev", "dev", now, now, now);
+  });
+
   it("enforces unique active sibling folder names, including at the root", () => {
     insertCollection("c1", "c");
     insertItem("f1", "c1", null, "folder", "shared");

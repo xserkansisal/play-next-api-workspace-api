@@ -117,13 +117,20 @@ export const requestHeaders = sqliteTable("request_headers", keyValueRowColumns(
   check("request_headers_position_check", sql`"position" >= 0`),
 ]);
 
-export const environments = sqliteTable("environments", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-  deletedAt: text("deleted_at"),
-});
+export const environments = sqliteTable(
+  "environments",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+  },
+  (t) => [
+    uniqueIndex("environments_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
+  ],
+);
 
 export const environmentVariables = sqliteTable(
   "environment_variables",

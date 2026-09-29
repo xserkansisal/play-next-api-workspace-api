@@ -52,7 +52,7 @@ Normalized tables: `collections`, `items` (folders and requests as a recursive t
 strings, and deletion is a soft delete (`deleted_at`, plus `trash_root_id` on items so a subtree
 is restored together). Sibling order is not persisted; lists are returned alphabetically.
 Partial unique indexes enforce case-insensitive unique active collection names and sibling
-folder names (request names may repeat).
+folder names (request names may repeat), and case-insensitive unique active environment names.
 
 ## API (v1)
 
@@ -71,10 +71,10 @@ folder names (request names may repeat).
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
-| POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId]: newName } }` |
+| POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
 
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
-`FOLDER_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
+`FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
 
 ## Structure

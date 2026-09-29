@@ -5,7 +5,7 @@ import { BadRequestError, ConflictError, NotFoundError } from "../errors.js";
 import type { RestoreInput } from "../validation/schemas.js";
 import { nameKey, nowIso } from "./common.js";
 import { findActiveCollection, findActiveCollectionByName, readCollection, type CollectionAggregate } from "./collections.js";
-import { readEnvironment, type Environment } from "./environments.js";
+import { findActiveEnvironmentByName, readEnvironment, type Environment } from "./environments.js";
 import { readItem } from "./items.js";
 import { findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
 
@@ -22,7 +22,7 @@ export interface TrashEntry {
 
 export interface RestoreConflict {
   id: string;
-  kind: "collection" | "folder";
+  kind: "collection" | "folder" | "environment";
   name: string;
   collectionId: string | null;
   parentId: string | null;
@@ -133,7 +133,8 @@ function subtreeRows(db: DbExecutor, rootId: string): ItemRow[] {
 function analyze(db: DbExecutor, root: TrashRoot, input: RestoreInput) {
   const overrides = new Map(Object.entries(input.nameOverrides));
   const restoreRows = root.kind === "environment" ? [] : subtreeRows(db, root.row.id);
-  const restoreIds = new Set(restoreRows.map((r) => r.id));
+  // Environments have no subtree; their own ID is the only valid override key.
+  const restoreIds = new Set(root.kind === "environment" ? [root.row.id] : restoreRows.map((r) => r.id));
 
   if (root.kind !== "collection" && input.collectionName !== undefined) {
     throw new BadRequestError("collectionName can only be used when restoring a collection", "INVALID_RESTORE_OVERRIDE");
@@ -163,6 +164,14 @@ function analyze(db: DbExecutor, root: TrashRoot, input: RestoreInput) {
     const existing = findActiveCollectionByName(db, name, root.row.id);
     if (existing) {
       conflicts.push({ id: root.row.id, kind: "collection", name, collectionId: null, parentId: null, conflictingId: existing.id });
+    }
+  }
+
+  if (root.kind === "environment") {
+    const name = overrides.get(root.row.id) ?? root.row.name;
+    const existing = findActiveEnvironmentByName(db, name, root.row.id);
+    if (existing) {
+      conflicts.push({ id: root.row.id, kind: "environment", name, collectionId: null, parentId: null, conflictingId: existing.id });
     }
   }
 
@@ -219,7 +228,16 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
       }
 
       if (root.kind === "environment") {
-        tx.update(environments).set({ deletedAt: null }).where(eq(environments.id, id)).run();
+        const name = overrides.get(id);
+        tx.update(environments)
+          .set({
+            deletedAt: null,
+            ...(name !== undefined && name !== root.row.name
+              ? { name, nameKey: nameKey(name), updatedAt: timestamp }
+              : {}),
+          })
+          .where(eq(environments.id, id))
+          .run();
         return { kind: "environment", environment: readEnvironment(tx, id) };
       }
 
