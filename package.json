@@ -14,19 +14,31 @@
     "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
+    "db:check": "drizzle-kit check"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.3",
     "express": "^5.2.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^22.20.4",
     "@types/supertest": "^7.2.1",
+    "drizzle-kit": "^0.31.11",
     "supertest": "^7.3.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
   }
 }

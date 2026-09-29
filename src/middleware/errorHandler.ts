@@ -37,6 +37,9 @@ export function createErrorHandler(options: ErrorHandlerOptions = {}): ErrorRequ
     } else if (err instanceof ZodError) {
       status = 400;
       body = { error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: err.issues } };
+    } else if (isSqliteUniqueViolation(err)) {
+      status = 409;
+      body = { error: { code: "CONFLICT", message: "The change conflicts with existing data" } };
     } else if (isBodyParserError(err)) {
       status = err.status;
       body = { error: { code: "BAD_REQUEST", message: err.expose ? err.message : "Bad request" } };
@@ -63,5 +66,15 @@ function isBodyParserError(err: unknown): err is { status: number; expose?: bool
     typeof (err as { status: unknown }).status === "number" &&
     (err as { status: number }).status >= 400 &&
     (err as { status: number }).status < 500
+  );
+}
+
+function isSqliteUniqueViolation(err: unknown): boolean {
+  const code = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  const cause = typeof err === "object" && err !== null ? (err as { cause?: unknown }).cause : undefined;
+  return (
+    code === "SQLITE_CONSTRAINT_UNIQUE" ||
+    code === "SQLITE_CONSTRAINT_PRIMARYKEY" ||
+    (cause !== undefined && cause !== err && isSqliteUniqueViolation(cause))
   );
 }

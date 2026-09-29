@@ -16,3 +16,17 @@ export class NotFoundError extends HttpError {
     this.name = "NotFoundError";
   }
 }
+
+export class BadRequestError extends HttpError {
+  constructor(message: string, code = "BAD_REQUEST", details?: unknown) {
+    super(400, message, code, details);
+    this.name = "BadRequestError";
+  }
+}
+
+export class ConflictError extends HttpError {
+  constructor(message: string, code = "CONFLICT", details?: unknown) {
+    super(409, message, code, details);
+    this.name = "ConflictError";
+  }
+}

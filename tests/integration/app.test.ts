@@ -1,8 +1,10 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
-import { createApp } from "../../src/app.js";
+import { afterAll, describe, expect, it } from "vitest";
+import { createTestContext } from "../helpers.js";
 
-const app = createApp({ env: { NODE_ENV: "test" }, logger: () => {} });
+const ctx = createTestContext();
+const app = ctx.app;
+afterAll(() => ctx.close());
 
 describe("API app", () => {
   it("GET /health returns ok", async () => {

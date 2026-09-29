@@ -3,7 +3,12 @@ import { EnvValidationError, loadEnv } from "../../src/config/env.js";
 
 describe("loadEnv", () => {
   it("applies defaults when variables are missing", () => {
-    expect(loadEnv({})).toEqual({ NODE_ENV: "development", HOST: "0.0.0.0", PORT: 3000 });
+    expect(loadEnv({})).toEqual({
+      NODE_ENV: "development",
+      HOST: "0.0.0.0",
+      PORT: 3000,
+      DATABASE_PATH: "./data/api.sqlite",
+    });
   });
 
   it("parses provided values and coerces PORT", () => {
@@ -11,6 +16,7 @@ describe("loadEnv", () => {
       NODE_ENV: "production",
       HOST: "127.0.0.1",
       PORT: 8080,
+      DATABASE_PATH: "./data/api.sqlite",
     });
   });
 
