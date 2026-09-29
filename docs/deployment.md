@@ -3,8 +3,16 @@
 ## Deployment model and prerequisites
 
 The supported deployment target is one on-premises VM on the organization's internal network.
-The web app and API listen on separate HTTP addresses/ports; there is no reverse proxy in this
-deployment. Set `CORS_ORIGIN` to the exact web origin (scheme, hostname, and port, with no path).
+Nginx serves the web build and reverse-proxies `/api` to the PM2-managed API. The browser sees a
+single origin, so CORS is not needed for normal operation. `CORS_ORIGIN` is only relevant when
+accessing the API port directly from a browser or when developing against Vite.
+
+When nginx runs on the API VM, bind the API to `127.0.0.1` so the service port is not exposed to
+other machines. The API's `HOST` setting is configurable; while the application default is
+`0.0.0.0`, the PM2 ecosystem config defaults to loopback. Verify the bound address and port
+(for example, `ss -ltnp`) and verify nginx's upstream points to that same local address and
+configured port. Do not open the API port to the network.
+
 TLS is intentionally not used for this scoped internal deployment, which has no credentials in
 transit. Revisit this decision before adding sign-in or exposing either service beyond the
 internal network.
@@ -38,22 +46,25 @@ and filesystem layout are not prescribed here. Create the directory before migra
 ## Configure environment and migrate
 
 Export the production settings in the shell or service-management environment used to invoke
-PM2. The ecosystem file requires `PORT`, `DATABASE_PATH`, and `CORS_ORIGIN`; it defaults `HOST`
-to `0.0.0.0`, `SSE_HEARTBEAT_MS` to `15000`, and `SSE_RETRY_MS` to `3000`.
+PM2. The ecosystem file requires `PORT` and `DATABASE_PATH`; it defaults `HOST` to `127.0.0.1`,
+`SSE_HEARTBEAT_MS` to `15000`, and `SSE_RETRY_MS` to `3000`. Set `CORS_ORIGIN` only if direct
+browser access or Vite development requires it.
 
 ```sh
 export NODE_ENV=production
-export HOST=0.0.0.0
-export PORT=3000                       # choose an unused internal port
+export HOST=127.0.0.1                  # nginx connects locally; keep the API port off the network
+export PORT=3000                       # choose an unused local port
 export DATABASE_PATH=/persistent/path/api.sqlite  # choose a persistent path outside this checkout
-export CORS_ORIGIN=http://web-vm:5173  # exact web origin; replace with the real internal origin
+# Optional only for direct browser access or Vite development:
+# export CORS_ORIGIN=http://localhost:5173
 export SSE_HEARTBEAT_MS=15000
 export SSE_RETRY_MS=3000
 ```
 
-The sample values are not machine-specific configuration; replace the web origin, port, and
-persistent path for the VM. The frontend must use the corresponding API HTTP address and port.
-CORS is exact-origin and does not enable credentialed requests.
+The sample values are not machine-specific configuration; choose an unused port and persistent
+path for the VM. The web browser uses nginx's origin; nginx's `/api` upstream uses the loopback
+API address and port. The API's CORS middleware permits only the exact configured origin and
+does not enable credentialed requests.
 
 Before upgrading a populated database, stop the API and take a verified backup using the
 procedure below. Run the read-only name-key preflight:
@@ -92,12 +103,16 @@ Multiple PM2 workers would split events and violate that single-writer deploymen
 Start and inspect the service:
 
 ```sh
-PORT="$PORT" DATABASE_PATH="$DATABASE_PATH" CORS_ORIGIN="$CORS_ORIGIN" \
-  HOST="$HOST" SSE_HEARTBEAT_MS="$SSE_HEARTBEAT_MS" SSE_RETRY_MS="$SSE_RETRY_MS" \
+PORT="$PORT" DATABASE_PATH="$DATABASE_PATH" HOST="$HOST" \
+  SSE_HEARTBEAT_MS="$SSE_HEARTBEAT_MS" SSE_RETRY_MS="$SSE_RETRY_MS" \
   pm2 start ecosystem.config.cjs --only play-next-api
 pm2 status
 pm2 logs play-next-api
 ```
+
+Do not set `CORS_ORIGIN` for the regular nginx/same-origin deployment. When testing direct
+browser access or using Vite, provide the exact origin in PM2's environment and restart/update
+the PM2 process environment accordingly.
 
 PM2 sends `SIGINT` when stopping/restarting the process. The API closes the in-memory event hub
 first (ending every SSE response), then closes the HTTP server and SQLite connection. A client
@@ -116,6 +131,22 @@ Run the exact command printed by `pm2 startup` with the required elevated privil
 reboot during an approved maintenance window and verify `pm2 status`, logs, `/health`, and
 `/api/v1/events`. `pm2 save` alone does not install the boot-time integration. Re-run `pm2 save`
 after intentional process-list changes. Reboot persistence must be validated on the target VM.
+
+## Reverse-proxy considerations
+
+The nginx web configuration is maintained with the web deployment, not by this API. Its `/api`
+location must proxy to the API's loopback address and `PORT`, preserve the SSE response as a
+stream, set `proxy_buffering off`, and allow a long `proxy_read_timeout`. Nginx buffers proxied
+responses by default; incorrect buffering or a short read timeout is the most likely reason
+live updates stop while API health checks continue to pass. Treat this as a proxy issue first
+when ordinary API calls work but SSE notifications do not arrive.
+
+The API currently does not trust proxy headers or resolve the original client address from
+`X-Forwarded-For`. Behind nginx, it sees nginx's address as the peer. This is a known
+consideration to resolve before Slice 7 email sign-in: planned per-IP rate limiting would
+otherwise see every request as coming from nginx and could throttle all users together.
+Design a trusted-proxy boundary and client-IP policy before implementing that limiter; do not
+blindly trust arbitrary forwarded headers.
 
 ## SQLite backup and restore
 

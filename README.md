@@ -38,10 +38,10 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | Variable   | Default       | Notes                                  |
 | ---------- | ------------- | -------------------------------------- |
 | `NODE_ENV` | `development` | `development` \| `test` \| `production` |
-| `HOST`     | `0.0.0.0`     |                                        |
+| `HOST`     | `0.0.0.0`     | Bind address; use `127.0.0.1` behind a same-host reverse proxy |
 | `PORT`     | `3000`        | Integer 0–65535                        |
 | `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
-| `CORS_ORIGIN` | unset | Optional single allowed browser origin (for local Vite, `http://localhost:5173`); no credentials are enabled |
+| `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; not needed for same-origin nginx proxying; no credentials are enabled |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
 
@@ -121,8 +121,33 @@ data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<
   shutdown the server ends every stream before closing, and new connections get `503`.
 - **Single process:** the hub (`src/events/hub.ts`) is in-memory. Run exactly one API process
   per SQLite database; there is no cross-process or distributed fan-out.
+- **Reverse proxy:** nginx buffers proxied responses by default. Its `/api` location must disable
+  proxy buffering and use a long read timeout for SSE. If live updates stop while the API
+  otherwise appears healthy, check nginx buffering/timeouts first.
 
 ## Operations
+
+### Single-origin web/API deployment
+
+For the on-prem deployment, nginx serves the web app and proxies `/api` to the PM2-managed API
+on the same origin. Browser requests are same-origin, so CORS is not part of the normal
+deployment path. `CORS_ORIGIN` remains available only for direct browser access to the API port
+or development against the Vite server.
+
+Bind the API to `127.0.0.1` when nginx runs on the same VM; `HOST` is configurable even though
+the application default is `0.0.0.0`. Verify the actual listener is loopback-only (for example
+with `ss -ltnp`) and that the nginx upstream targets that address and the configured `PORT`.
+Do not expose the API port to other network hosts.
+
+The API does not currently enable Express proxy trust or consume forwarded client-IP headers.
+Behind nginx, the remote address visible to the API is nginx's address. Before Slice 7 email
+sign-in and per-IP rate limiting, explicitly design and implement trusted proxy/client-IP
+handling; otherwise the limiter could treat all users as nginx and throttle them together.
+
+Nginx must disable response buffering and allow a long read timeout for `/api` SSE responses.
+If live updates fail while ordinary API requests and health checks still work, check nginx's
+SSE buffering and timeout settings first—the API can remain healthy while the proxy hides or
+delays the stream.
 
 ### Backup and restore
 
