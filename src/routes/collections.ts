@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
+import type { ChangeEventHub } from "../events/hub.js";
 import { createCollection, listCollections, readCollection, trashCollection, updateCollection } from "../services/collections.js";
 import { createItem, readItem, trashItem, updateItem } from "../services/items.js";
 import {
@@ -9,7 +10,8 @@ import {
   updateItemSchema,
 } from "../validation/schemas.js";
 
-export function createCollectionsRouter(db: AppDatabase): Router {
+// Services commit synchronously before returning, so publishing afterwards only reports committed writes.
+export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
   router.get("/", (_req, res) => {
@@ -17,7 +19,9 @@ export function createCollectionsRouter(db: AppDatabase): Router {
   });
 
   router.post("/", (req, res) => {
-    res.status(201).json(createCollection(db, createCollectionSchema.parse(req.body)));
+    const collection = createCollection(db, createCollectionSchema.parse(req.body));
+    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
+    res.status(201).json(collection);
   });
 
   router.get("/:collectionId", (req, res) => {
@@ -25,16 +29,21 @@ export function createCollectionsRouter(db: AppDatabase): Router {
   });
 
   router.put("/:collectionId", (req, res) => {
-    res.json(updateCollection(db, req.params.collectionId, updateCollectionSchema.parse(req.body)));
+    const collection = updateCollection(db, req.params.collectionId, updateCollectionSchema.parse(req.body));
+    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
+    res.json(collection);
   });
 
   router.delete("/:collectionId", (req, res) => {
-    trashCollection(db, req.params.collectionId);
+    const trashed = trashCollection(db, req.params.collectionId);
+    events.publish({ kind: "collection", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
     res.status(204).end();
   });
 
   router.post("/:collectionId/items", (req, res) => {
-    res.status(201).json(createItem(db, req.params.collectionId, createItemSchema.parse(req.body)));
+    const item = createItem(db, req.params.collectionId, createItemSchema.parse(req.body));
+    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
+    res.status(201).json(item);
   });
 
   router.get("/:collectionId/items/:itemId", (req, res) => {
@@ -42,11 +51,20 @@ export function createCollectionsRouter(db: AppDatabase): Router {
   });
 
   router.put("/:collectionId/items/:itemId", (req, res) => {
-    res.json(updateItem(db, req.params.collectionId, req.params.itemId, updateItemSchema.parse(req.body)));
+    const item = updateItem(db, req.params.collectionId, req.params.itemId, updateItemSchema.parse(req.body));
+    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
+    res.json(item);
   });
 
   router.delete("/:collectionId/items/:itemId", (req, res) => {
-    trashItem(db, req.params.collectionId, req.params.itemId);
+    const trashed = trashItem(db, req.params.collectionId, req.params.itemId);
+    events.publish({
+      kind: trashed.kind,
+      id: trashed.id,
+      collectionId: trashed.collectionId,
+      operation: "trashed",
+      changedAt: trashed.deletedAt,
+    });
     res.status(204).end();
   });
 

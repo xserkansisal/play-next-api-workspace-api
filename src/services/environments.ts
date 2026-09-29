@@ -133,11 +133,13 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
   );
 }
 
-export function trashEnvironment(db: AppDatabase, id: string): void {
-  db.transaction(
+export function trashEnvironment(db: AppDatabase, id: string): { id: string; deletedAt: string } {
+  return db.transaction(
     (tx) => {
       requireActive(tx, id);
-      tx.update(environments).set({ deletedAt: nowIso() }).where(eq(environments.id, id)).run();
+      const deletedAt = nowIso();
+      tx.update(environments).set({ deletedAt }).where(eq(environments.id, id)).run();
+      return { id, deletedAt };
     },
     { behavior: "immediate" },
   );

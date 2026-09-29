@@ -207,8 +207,13 @@ export function checkRestore(db: AppDatabase, id: string, input: RestoreInput): 
   });
 }
 
+export interface RestoreOutcome {
+  resource: RestoredResource;
+  restoredAt: string;
+}
+
 /** Restores a Trash root and its whole subtree atomically, applying name overrides. */
-export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInput): RestoredResource {
+export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInput): RestoreOutcome {
   return db.transaction(
     (tx) => {
       const root = findTrashRoot(tx, id);
@@ -238,7 +243,7 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
           })
           .where(eq(environments.id, id))
           .run();
-        return { kind: "environment", environment: readEnvironment(tx, id) };
+        return { resource: { kind: "environment", environment: readEnvironment(tx, id) }, restoredAt: timestamp };
       }
 
       if (root.kind === "collection") {
@@ -262,8 +267,10 @@ export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInpu
           .run();
       }
 
-      if (root.kind === "collection") return { kind: "collection", collection: readCollection(tx, id) };
-      return { kind: root.row.kind, item: readItem(tx, root.row.collectionId, id) };
+      if (root.kind === "collection") {
+        return { resource: { kind: "collection", collection: readCollection(tx, id) }, restoredAt: timestamp };
+      }
+      return { resource: { kind: root.row.kind, item: readItem(tx, root.row.collectionId, id) }, restoredAt: timestamp };
     },
     { behavior: "immediate" },
   );

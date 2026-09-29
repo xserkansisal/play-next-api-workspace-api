@@ -5,18 +5,41 @@ import request from "supertest";
 import type { Express } from "express";
 import { createApp } from "../src/app.js";
 import { closeDatabase, openDatabase, type AppDatabase } from "../src/db/client.js";
+import { ChangeEventHub } from "../src/events/hub.js";
 
 export interface TestContext {
   db: AppDatabase;
   app: Express;
+  events: ChangeEventHub;
   api: ReturnType<typeof request>;
   close: () => void;
 }
 
-export function createTestContext(path = ":memory:"): TestContext {
+export interface TestContextOptions {
+  heartbeatMs?: number;
+  retryMs?: number;
+  replayBufferSize?: number;
+}
+
+export function createTestContext(path = ":memory:", options: TestContextOptions = {}): TestContext {
   const db = openDatabase(path);
-  const app = createApp({ env: { NODE_ENV: "test" }, db, logger: () => {} });
-  return { db, app, api: request(app), close: () => closeDatabase(db) };
+  const events = new ChangeEventHub({ replayBufferSize: options.replayBufferSize });
+  const app = createApp({
+    env: { NODE_ENV: "test", SSE_HEARTBEAT_MS: options.heartbeatMs ?? 60_000, SSE_RETRY_MS: options.retryMs ?? 1_500 },
+    db,
+    events,
+    logger: () => {},
+  });
+  return {
+    db,
+    app,
+    events,
+    api: request(app),
+    close: () => {
+      events.close();
+      closeDatabase(db);
+    },
+  };
 }
 
 export function createTempDir(): { dir: string; cleanup: () => void } {

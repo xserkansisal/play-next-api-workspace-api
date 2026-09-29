@@ -8,6 +8,8 @@ describe("loadEnv", () => {
       HOST: "0.0.0.0",
       PORT: 3000,
       DATABASE_PATH: "./data/api.sqlite",
+      SSE_HEARTBEAT_MS: 15000,
+      SSE_RETRY_MS: 3000,
     });
   });
 
@@ -17,6 +19,8 @@ describe("loadEnv", () => {
       HOST: "127.0.0.1",
       PORT: 8080,
       DATABASE_PATH: "./data/api.sqlite",
+      SSE_HEARTBEAT_MS: 15000,
+      SSE_RETRY_MS: 3000,
     });
   });
 

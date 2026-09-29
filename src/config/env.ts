@@ -5,6 +5,8 @@ const envSchema = z.object({
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
   DATABASE_PATH: z.string().min(1).default("./data/api.sqlite"),
+  SSE_HEARTBEAT_MS: z.coerce.number().int().min(1000).max(300_000).default(15_000),
+  SSE_RETRY_MS: z.coerce.number().int().min(100).max(300_000).default(3_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

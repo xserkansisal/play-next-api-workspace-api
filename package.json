@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
-    "db:check": "drizzle-kit check"
+    "db:check": "drizzle-kit check",
+    "db:check-name-keys": "tsx --env-file-if-exists=.env src/db/checkNameKeys.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

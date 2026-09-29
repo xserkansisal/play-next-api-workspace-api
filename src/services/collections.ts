@@ -119,8 +119,8 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
 }
 
 /** Moves a collection and all of its active items to Trash as one restorable root. */
-export function trashCollection(db: AppDatabase, id: string): void {
-  db.transaction(
+export function trashCollection(db: AppDatabase, id: string): { id: string; deletedAt: string } {
+  return db.transaction(
     (tx) => {
       requireActiveCollection(tx, id);
       const timestamp = nowIso();
@@ -129,6 +129,7 @@ export function trashCollection(db: AppDatabase, id: string): void {
         .where(and(eq(items.collectionId, id), isNull(items.deletedAt)))
         .run();
       tx.update(collections).set({ deletedAt: timestamp }).where(eq(collections.id, id)).run();
+      return { id, deletedAt: timestamp };
     },
     { behavior: "immediate" },
   );

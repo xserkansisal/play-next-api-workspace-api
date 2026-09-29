@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { reconcileNameKeys } from "./nameKeys.js";
 import * as schema from "./schema.js";
 
 export type AppDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
@@ -29,13 +30,20 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): A
 
   const db = drizzle(sqlite, { schema }) as AppDatabase;
   if (options.migrate ?? true) {
-    runMigrations(db);
+    try {
+      runMigrations(db);
+    } catch (err) {
+      sqlite.close();
+      throw err;
+    }
   }
   return db;
 }
 
+/** Applies pending migrations, then repairs name keys that SQL backfills could not fold correctly. */
 export function runMigrations(db: AppDatabase): void {
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  reconcileNameKeys(db);
 }
 
 export function closeDatabase(db: AppDatabase): void {

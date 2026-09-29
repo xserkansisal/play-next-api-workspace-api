@@ -99,11 +99,18 @@ export function updateItem(db: AppDatabase, collectionId: string, itemId: string
 }
 
 /** Moves an item (and, for folders, its active descendants) to Trash as one restorable root. */
-export function trashItem(db: AppDatabase, collectionId: string, itemId: string): void {
-  db.transaction(
+export interface TrashedItem {
+  id: string;
+  collectionId: string;
+  kind: "folder" | "request";
+  deletedAt: string;
+}
+
+export function trashItem(db: AppDatabase, collectionId: string, itemId: string): TrashedItem {
+  return db.transaction(
     (tx) => {
       requireActiveCollection(tx, collectionId);
-      requireActiveItem(tx, collectionId, itemId);
+      const row = requireActiveItem(tx, collectionId, itemId);
       const ids = activeSubtreeIds(tx, itemId);
       const timestamp = nowIso();
       for (let i = 0; i < ids.length; i += 500) {
@@ -112,6 +119,7 @@ export function trashItem(db: AppDatabase, collectionId: string, itemId: string)
           .where(inArray(items.id, ids.slice(i, i + 500)))
           .run();
       }
+      return { id: itemId, collectionId, kind: row.kind, deletedAt: timestamp };
     },
     { behavior: "immediate" },
   );

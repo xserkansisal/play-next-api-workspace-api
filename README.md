@@ -27,6 +27,7 @@ npm run dev            # http://localhost:3000/health
 | `npm run db:generate` | Generate a SQL migration from `src/db/schema.ts` into `drizzle/` |
 | `npm run db:migrate`  | Apply pending migrations to `DATABASE_PATH` (the server also applies them on startup) |
 | `npm run db:check`    | Check generated migrations for consistency     |
+| `npm run db:check-name-keys` | Read-only report of stale case-folded name keys and Unicode name collisions (exit 1 on collisions) |
 
 ## Configuration
 
@@ -38,6 +39,8 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `HOST`     | `0.0.0.0`     |                                        |
 | `PORT`     | `3000`        | Integer 0–65535                        |
 | `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
+| `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
+| `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
 
 ## Persistence
 
@@ -72,20 +75,102 @@ folder names (request names may repeat), and case-insensitive unique active envi
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
+| GET | `/api/v1/events` | Server-Sent Events stream of value-free change notifications |
 
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
+
+## Live change notifications (SSE)
+
+`GET /api/v1/events` (`text/event-stream`) tells clients *that* something changed so they can
+refetch it; it never carries data. A frame is emitted only after a create, update, move to
+Trash or restore of a collection, folder, request or environment has been **committed**. Reads,
+restore checks and failed writes (4xx/5xx) emit nothing.
+
+```text
+retry: 3000
+
+event: ready
+data: {"epoch":"<uuid>"}
+
+id: <epoch>:42
+event: change
+data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<collectionId>","operation":"updated","changedAt":"2026-01-01T00:00:00.000Z"}
+
+: heartbeat 2026-01-01T00:00:15.000Z
+```
+
+- `kind`: `collection` | `folder` | `request` | `environment`; `operation`: `created` |
+  `updated` | `trashed` | `restored`; `collectionId` is the owning collection for folders/requests and `null` for
+  collections and environments. Payloads never include names, URLs, headers, query params, bodies or
+  environment variable values. A subtree trash or restore emits one event for its root.
+- **Heartbeat:** a `: heartbeat` comment every `SSE_HEARTBEAT_MS` keeps proxies from timing out
+  idle connections.
+- **Reconnect:** `retry:` sets the browser `EventSource` reconnect delay. On reconnect the
+  browser sends `Last-Event-ID` (clients can also pass `?lastEventId=`); missed events are
+  replayed from an in-memory buffer (last 1000 events) before `ready`. If they cannot be
+  replayed (the server restarted so the epoch changed, the ID is too old, or it is malformed),
+  the server sends `event: resync` (`{"reason":"history_unavailable"}`) and the client should
+  refetch whatever it has displayed.
+- **Lifecycle:** each connection's heartbeat and subscription are released when the client
+  disconnects. A client whose socket buffer stays full is dropped (it will reconnect). On
+  shutdown the server ends every stream before closing, and new connections get `503`.
+- **Single process:** the hub (`src/events/hub.ts`) is in-memory. Run exactly one API process
+  per SQLite database; there is no cross-process or distributed fan-out.
+
+## Operations
+
+### Backup and restore
+
+The database is a single SQLite file in WAL mode. Stop the API, then copy `DATABASE_PATH`
+together with any `-wal`/`-shm` files next to it; restore by putting them back while the API is
+stopped. For a hot backup, use `sqlite3 "$DATABASE_PATH" ".backup backup.sqlite"` instead of
+copying files.
+
+### Migration caveat: case-folded name keys
+
+Uniqueness checks compare a `name_key` column computed in JavaScript with
+`name.normalize("NFC").toLowerCase()`, which is locale-independent Unicode. SQL migrations
+cannot reproduce that: `0001_environment_name_unique` backfills `environments.name_key` with
+SQLite's `lower()`, which folds **ASCII only**. On a database that already held environments,
+that would give non-ASCII names (such as `ÄRGER` → `Ärger`) wrong keys, so `ärger` could be
+created alongside it. Names that differ only in non-ASCII case would also slip past the new
+unique index. (Names that differ only in ASCII case make the migration itself fail and roll
+back.) No deployment data exists yet, so today this matters only for local databases.
+
+Safeguards:
+
+1. After migrations, startup (and `npm run db:migrate`) runs `reconcileNameKeys`
+   (`src/db/nameKeys.ts`). In one transaction it recomputes every collection, item and
+   environment `name_key` in JavaScript. If the corrected keys would make active names collide,
+   it refuses to write anything and the process exits with the colliding IDs, rather than
+   weakening uniqueness.
+2. Safe upgrade path for any populated database:
+   1. Stop the API and back up the database (see above).
+   2. Preflight: run `npm run db:check-name-keys`. It is read-only, also works before `0001`
+      is applied, and lists every group of active names that collide case-insensitively.
+   3. Resolve each collision by renaming or trashing all but one entry (for example with
+      `sqlite3` on the stopped database, or through the API on the old version). Repeat step 2
+      until it exits `0`.
+   4. Start the API (or run `npm run db:migrate`). Migrations and key reconciliation run, then
+      step 2 reports no changes.
+   5. If startup reports a `NameKeyCollisionError`, `0001` has already committed but keys are
+      unchanged. Resolve the listed IDs and start again, or restore the backup.
+3. Future migrations that add or change `name_key`-style columns must not rely on SQL
+   `lower()`/`upper()`. Backfill a placeholder in SQL and leave the real value to
+   `reconcileNameKeys`, which runs after every migration.
 
 ## Structure
 
 - `src/app.ts` – `createApp()` factory (no network side effects; used by tests)
 - `src/server.ts` – startup entry point (loads env, listens, graceful shutdown)
 - `src/middleware/errorHandler.ts` – 404 + centralized JSON error handling
-- `src/routes/` – `GET /health` and the `/api/v1` routers (HTTP + Zod parsing only)
+- `src/routes/` – `GET /health` and the `/api/v1` routers (HTTP + Zod parsing only), including the SSE endpoint
+- `src/events/` – in-process change-event hub (publish after commit, replay buffer)
 - `src/services/` – persistence/business rules with explicit transaction boundaries
 - `src/validation/schemas.ts` – Zod request schemas
-- `src/db/` – Drizzle schema, connection/migration helpers, migrate CLI
+- `src/db/` – Drizzle schema, connection/migration helpers, name-key reconciliation, migrate/check CLIs
 - `tests/unit`, `tests/integration` – Vitest and Supertest suites
 
 Errors are returned as `{ "error": { "code", "message", "details?" } }`.
