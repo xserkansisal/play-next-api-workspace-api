@@ -199,3 +199,40 @@ export const environmentVariables = sqliteTable(
     check("environment_variables_position_check", sql`"position" >= 0`),
   ],
 );
+
+/**
+ * Variables captured out of a response and reused in later requests, held at one of two scopes.
+ *
+ * `user` rows belong to one person and no one else can read or write them; `global` rows are
+ * shared by everyone. They are deliberately separate from `environment_variables`: an environment
+ * is a shared, exportable document, and writing a value captured from one person's session into it
+ * would silently change what every teammate sends.
+ *
+ * A nullable `user_id` carries the distinction rather than two tables, so one query and one route
+ * serve both. The check constraint is what stops the two halves drifting apart - a `user` row with
+ * no owner would be readable by everybody, which is the exact opposite of what the scope means.
+ */
+export const variables = sqliteTable(
+  "variables",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope").notNull(),
+    userId: text("user_id").references(() => users.id),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => users.id),
+  },
+  (t) => [
+    check("variables_scope_check", sql`"scope" IN ('user', 'global')`),
+    check(
+      "variables_owner_check",
+      sql`("scope" = 'user' AND "user_id" IS NOT NULL) OR ("scope" = 'global' AND "user_id" IS NULL)`,
+    ),
+    // Partial, so one person's "token" never collides with anybody else's, and the single global
+    // "token" stays single.
+    uniqueIndex("variables_user_key_unique").on(t.userId, t.key).where(sql`"scope" = 'user'`),
+    uniqueIndex("variables_global_key_unique").on(t.key).where(sql`"scope" = 'global'`),
+  ],
+);

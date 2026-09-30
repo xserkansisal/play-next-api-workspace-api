@@ -97,6 +97,9 @@ folder names (request names may repeat), and case-insensitive unique active envi
 | GET/POST | `/api/v1/environments` | List / create environments |
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
+| GET | `/api/v1/variables` | This user's own variables plus every global one |
+| PUT | `/api/v1/variables/:scope/:key` | Save a value at `user` or `global` scope. Body: `{ "value": string }` |
+| DELETE | `/api/v1/variables/:scope/:key` | Forget one variable at that scope |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
@@ -105,6 +108,37 @@ folder names (request names may repeat), and case-insensitive unique active envi
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
+
+## Scoped variables
+
+A value read out of a response - a token, a piece of game state - is reused in the next request
+through the same `{{key}}` substitution as an environment variable. It is stored at one of two
+scopes:
+
+- **`user`** belongs to the signed-in account. Nobody else can read it, write it or delete it, and
+  a request for it never selects another person's rows in the first place.
+- **`global`** is shared by everyone signed in.
+
+They are a separate table from `environment_variables` on purpose. An environment is a shared,
+exportable document that people edit by hand; writing a value captured from one person's session
+into it would silently change what every teammate sends, and would then be exported with the
+collection.
+
+The two scopes live in one table with a nullable `user_id`, so one query and one route serve both.
+A check constraint is what keeps the halves from drifting: a `user` row with no owner would be
+readable by everybody, which is the exact opposite of what the scope means. Two partial unique
+indexes let one person's `token` coexist with everyone else's and with the single global one.
+
+Writes are upserts - saving `token` twice means the second reading replaced the first, never that
+there are now two. Keys must be usable as `{{key}}`, so the same rule as environment variables
+applies: no whitespace, no braces.
+
+Only a **global** write is announced over SSE. A personal value concerns one person, and
+broadcasting it would make every other client refetch for nothing while telling the whole team
+which keys that person holds.
+
+Values are stored in plain text, exactly as environment variables already are. Nothing here makes
+a secret safer than it is in an environment.
 
 ## Making a copy
 

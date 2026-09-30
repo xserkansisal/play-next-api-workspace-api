@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type ChangeResourceKind = "collection" | "folder" | "request" | "environment";
+export type ChangeResourceKind = "collection" | "folder" | "request" | "environment" | "variable";
 export type ChangeOperation = "created" | "updated" | "trashed" | "restored";
 
 /**

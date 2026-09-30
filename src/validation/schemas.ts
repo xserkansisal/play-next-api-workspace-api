@@ -124,6 +124,18 @@ export const environmentVariableSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
+// Scoped variables reuse the environment key rules: both are referenced as {{key}}, so a key that
+// breaks that reference is just as unusable here. Values are larger than a row's text because a
+// captured value is whatever the response held - game state, for instance, is a whole JSON object.
+export const variableKeySchema = environmentVariableSchema.shape.key;
+
+export const variableScopeSchema = z.enum(["user", "global"]);
+
+export const variableInputSchema = z.strictObject({
+  value: z.string().max(MAX_BODY_LENGTH),
+});
+export type VariableInput = z.output<typeof variableInputSchema>;
+
 export const environmentInputSchema = z
   .strictObject({
     name: nameSchema,
