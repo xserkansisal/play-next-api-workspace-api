@@ -45,7 +45,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; credentialed requests are allowed only from that origin; `*` echoes whatever origin calls, see "Allowing every origin"; not needed for same-origin nginx proxying |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
-| `AUTH_CODE_PEPPER` | development-only placeholder | HMAC secret, at least 32 characters; must be explicitly set in production |
+| `AUTH_CODE_PEPPER` | development-only placeholder | HMAC key for sign-in codes; a six-digit code is exhaustible from a stolen hash without it. Generate per environment with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Production refuses example and repeated-character values. See [deployment.md](docs/deployment.md#sign-in-code-pepper) |
 | `AUTH_CODE_TTL_SECONDS` | `900` | Sign-in code lifetime (15 minutes by default; range 60–3600) |
 | `AUTH_CODE_MAX_ATTEMPTS` | `5` | Wrong attempts allowed per code before it is invalidated |
 | `AUTH_CODE_REQUEST_LIMIT` / `AUTH_CODE_REQUEST_WINDOW_SECONDS` | `3` / `900` | Code requests allowed per normalized email per window |

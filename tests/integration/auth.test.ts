@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { connectSse, startServer } from "../sse.js";
 import { createTestContext, type TestContext } from "../helpers.js";
 import { MemoryEmailCodeSender } from "../../src/auth/email.js";
@@ -350,4 +353,52 @@ describe("email code sign-in", () => {
         .expect(404);
     },
   );
+
+  // Rotating AUTH_CODE_PEPPER is the recommended response to a suspected leak, so what it costs
+  // has to be known rather than assumed. Measured here: sessions survive (they are hashed without
+  // the pepper), only codes already in flight are invalidated, and those users request another.
+  it("keeps sessions signed in when the code pepper is rotated, and only invalidates codes in flight", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pepper-rotation-"));
+    const databasePath = join(directory, "rotation.sqlite");
+    const before = await createTestContext(databasePath, {
+      authenticate: false,
+      env: { AUTH_CODE_PEPPER: "a-pepper-used-before-the-rotation-000000" },
+    });
+
+    let sessionCookie: string;
+    let codeInFlight: string;
+    try {
+      const signIn = await issueCode(before, "stays@sisal.com");
+      const session = await before.unauthenticatedApi
+        .post("/api/v1/auth/verify-code")
+        .send({ email: signIn.to, code: signIn.code })
+        .expect(200);
+      sessionCookie = session.headers["set-cookie"]![0]!.split(";", 1)[0]!;
+
+      const pending = await issueCode(before, "midflight@sisal.com");
+      codeInFlight = pending.code;
+    } finally {
+      await before.close();
+    }
+
+    ctx = await createTestContext(databasePath, {
+      authenticate: false,
+      env: { AUTH_CODE_PEPPER: "a-different-pepper-after-the-rotation-111" },
+    });
+
+    await ctx.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", sessionCookie).expect(200);
+
+    await ctx.unauthenticatedApi
+      .post("/api/v1/auth/verify-code")
+      .send({ email: "midflight@sisal.com", code: codeInFlight })
+      .expect(401);
+
+    const reissued = await issueCode(ctx, "midflight@sisal.com");
+    await ctx.unauthenticatedApi
+      .post("/api/v1/auth/verify-code")
+      .send({ email: reissued.to, code: reissued.code })
+      .expect(200);
+
+    rmSync(directory, { recursive: true, force: true });
+  });
 });

@@ -69,7 +69,7 @@ export DATABASE_PATH=/persistent/path/api.sqlite  # choose a persistent path out
 # export CORS_ORIGIN=http://localhost:5173
 export SSE_HEARTBEAT_MS=15000
 export SSE_RETRY_MS=3000
-export AUTH_CODE_PEPPER='use-a-unique-random-secret-of-at-least-32-characters'
+export AUTH_CODE_PEPPER=          # generate once, paste the result here - see "Sign-in code pepper" below
 export AUTH_CODE_TTL_SECONDS=900
 export AUTH_CODE_MAX_ATTEMPTS=5
 export AUTH_CODE_REQUEST_LIMIT=3
@@ -137,6 +137,42 @@ the current code only when the token is supplied in `X-Dev-Inbox-Token` **and** 
 connected directly. A request relayed through a proxy is refused: behind nginx every caller's
 address is nginx's own, so an address check alone would admit the whole network. Never enable
 this in production, and do not assume nginx makes it safe in development either.
+
+### Sign-in code pepper
+
+`AUTH_CODE_PEPPER` is the HMAC key the API signs sign-in codes with before storing them. Only
+the hash is ever written to the database.
+
+It exists because a sign-in code is six digits - one million possibilities. Whoever steals the
+database also gets the challenge id each hash was bound to, so with a plain hash they can simply
+try every code and read off the match. Measured on the deployment laptop: exhausting the whole
+six-digit space against an unpeppered hash recovered the code in **213 ms**. The same exhaustive
+search against a peppered hash found nothing, because the key it needs is in the environment and
+not in the file that was stolen. That is the entire job of this value, and it only works while
+the pepper is secret and separate from the database.
+
+Session cookies deliberately do not use it. A session token is 256 random bits, so there is
+nothing to exhaust, and it is stored as a plain SHA-256 digest.
+
+Generate one per environment - never reuse staging's in production:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Put the result in the environment or the PM2 ecosystem file, the same place as the SMTP
+password. Never commit it. Production refuses to start on any value this repository has
+printed as an example, and on a long value typed by repeating one character - 32 characters of
+`a` is a length, not a secret.
+
+Rotating it is cheap, which makes it a usable response to a suspected leak. This was measured,
+not assumed, by booting the app twice over one database with different peppers: **existing
+sessions stayed signed in**, codes **already in flight were rejected**, and newly requested
+codes worked. So a rotation logs nobody out; it only means anyone mid-sign-in requests another
+code. `tests/integration/auth.test.ts` locks this behaviour in.
+
+Note that with no TLS in front of the API, the code itself still travels in plain text over the
+internal network. The pepper protects a stolen database, not the wire.
 
 Before upgrading a populated database, stop the API and take a verified backup using the
 procedure below. Run the read-only name-key preflight:
