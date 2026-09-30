@@ -11,6 +11,7 @@ import { createEnvironmentsRouter } from "./routes/environments.js";
 import { createEventsRouter } from "./routes/events.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createHealthRouter } from "./routes/health.js";
+import { createProxyRouter } from "./routes/proxy.js";
 import { createTrashRouter } from "./routes/trash.js";
 
 export interface CreateAppOptions {
@@ -46,6 +47,7 @@ export function createApp({
   app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events));
   app.use("/api/v1/environments", requireAuth, createEnvironmentsRouter(db, events));
   app.use("/api/v1/trash", requireAuth, createTrashRouter(db, events));
+  app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
 
   app.use(notFoundHandler);
   app.use(createErrorHandler({ exposeInternalErrors: env.NODE_ENV !== "production", logger }));

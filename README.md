@@ -180,6 +180,54 @@ data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<
   proxy buffering and use a long read timeout for SSE. If live updates stop while the API
   otherwise appears healthy, check nginx buffering/timeouts first.
 
+## Running a request from the server (`/api/v1/proxy`)
+
+A browser-based REST client cannot reach a server that does not send CORS headers. That is a
+restriction the browser places on the *page*, not a property of the request: the same call succeeds
+from curl or Postman. For those targets the client can ask this API to make the request instead.
+
+**This is server-side request forgery by design, so it is disabled until you opt in.** Set
+`PROXY_ALLOWED_HOSTS` to the hosts that may be reached, as `host` or `host:port`, comma separated.
+While it is empty every proxy call returns `403 PROXY_DISABLED`. Inside a private network an open
+proxy is worth *more* to an attacker than one on the public internet, because this process can reach
+hosts they cannot — so keep the list to what you actually need.
+
+```
+PROXY_ALLOWED_HOSTS=localhost:7799,internal-api.example.com
+```
+
+What protects you, beyond the allow-list:
+
+- **Redirects are never followed.** An allow-listed host could otherwise redirect to a cloud
+  metadata endpoint or another internal service and smuggle the response back. A redirect is
+  returned to the caller as an ordinary response instead.
+- **Only `http` and `https`.** No `file:`, `gopher:` or `data:`.
+- **Nothing about your session is forwarded.** Outgoing headers come only from the submitted
+  request, so the `play_next_session` cookie cannot leak to a third-party host.
+- Hop-by-hop headers are dropped, and `PROXY_TIMEOUT_MS` and `PROXY_MAX_RESPONSE_BYTES` bound how
+  much one request can cost.
+
+Matching is exact — `example.com` does not admit `evil-example.com` or `sub.example.com`. There are
+no wildcards. Adding a host requires an API restart.
+
+Not defended against: an allow-listed name is trusted, so if you allow-list a host whose DNS an
+attacker controls, they choose the address this process connects to. The allow-list is
+operator-controlled configuration, so that is a deliberate trade.
+
+Both routes require authentication.
+
+- `GET /api/v1/proxy` — `{ enabled, allowedHosts }`, so the client can say what is reachable instead
+  of only finding out by failing.
+- `POST /api/v1/proxy` — `{ method, url, headers: [[name, value]], body }`, returning
+  `{ status, statusText, headers, bodyText, durationMs, sizeBytes, truncated }`.
+
+The target's status travels *inside* the response body, and the proxy call itself returns 200. An
+upstream 404 is a successfully executed request; collapsing the two would make it impossible to tell
+an upstream error from a proxy failure. Proxy failures use their own codes: `PROXY_DISABLED`,
+`PROXY_HOST_NOT_ALLOWED`, `PROXY_INVALID_URL`, `PROXY_UNSUPPORTED_SCHEME`, `PROXY_REQUEST_FAILED`
+(502) and `PROXY_TIMEOUT` (504). `truncated` is true when the response hit the size limit, so the
+body must not be treated as complete.
+
 ## Operations
 
 ### Single-origin web/API deployment

@@ -7,6 +7,8 @@ describe("loadEnv", () => {
       NODE_ENV: "development",
       HOST: "0.0.0.0",
       PORT: 3000,
+      PROXY_TIMEOUT_MS: 30_000,
+      PROXY_MAX_RESPONSE_BYTES: 10_485_760,
       DATABASE_PATH: "./data/api.sqlite",
       SSE_HEARTBEAT_MS: 15000,
       SSE_RETRY_MS: 3000,
