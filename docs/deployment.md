@@ -86,6 +86,10 @@ export SMTP_SECURE=false
 export SMTP_USER=
 export SMTP_PASSWORD=
 export SMTP_FROM=play-next@example.internal
+# Server-side request execution, used by "Send from: Server" for targets that send no CORS
+# headers. Off unless set. Name the hosts as "host" or "host:port", comma separated; "*" removes
+# the allow-list entirely and makes this an open proxy for every signed-in user.
+export PROXY_ALLOWED_HOSTS=10.29.125.148:7799
 ```
 
 The sample values are not machine-specific configuration; choose an unused port and persistent
@@ -97,6 +101,42 @@ nginx deployment.
 The SMTP settings above are examples, not verified organizational settings. Production requires
 `SMTP_HOST` and `SMTP_FROM`; `SMTP_USER` and `SMTP_PASSWORD` must be supplied together when the
 relay requires authentication. Do not place secrets in checked-in files or command history.
+
+### Keeping the settings in a file on the server
+
+Typing the exports by hand puts the pepper and the SMTP password into shell history, and they are
+lost on the next login. Keep them in one file instead, owned by the deployment account and
+readable only by it:
+
+```sh
+sudo install -o "$USER" -g "$(id -gn)" -m 600 /dev/null /etc/play-next-api.env
+# edit /etc/play-next-api.env, then before starting PM2:
+set -a; . /etc/play-next-api.env; set +a
+pm2 start ecosystem.config.cjs --only play-next-api
+```
+
+Two things about that file decide whether the deployment works, and neither announces itself:
+
+**Quote any value containing `#`.** Everything from an unquoted `#` onwards is discarded as a
+comment. `SMTP_PASSWORD=s3cret#with-hash` reaches the relay as `s3cret`, which the relay answers
+with a plain authentication failure - nothing points at the file. Verified against a real SMTP
+server: the relay logged the password it received as `"s3cret"`. Write `SMTP_PASSWORD='s3cret#with-hash'`
+and run `npm run mail:check`, which catches this before a user does.
+
+**A variable already set in the environment wins over the file.** Node's `--env-file` and the
+shell both leave an existing value alone, so a stale `export` in `.bashrc` or a value baked into
+the PM2 process list silently overrides what the file says. After editing the file, restart with
+`pm2 restart play-next-api --update-env`; without `--update-env` PM2 reuses the environment it
+captured when the process was first started.
+
+`npm start` also reads a `.env` in the repository root, which is convenient for a quick check but
+is not the deployment path: it is inside the checkout, so it is easy to overwrite on the next
+deploy. Prefer the file outside the checkout.
+
+The variables this API reads are listed in `.env.example`. `tests/unit/ecosystem.test.ts` checks
+the PM2 ecosystem file forwards every one of them, because a setting that is exported but not
+forwarded produces no error - the API just runs on the default. That is exactly how the
+server-side proxy came to be disabled under PM2 while `PROXY_ALLOWED_HOSTS` was exported.
 
 `SMTP_SECURE` is the setting most often wrong: it means implicit TLS from the first byte, which is
 port `465`. On `587` it must stay `false`, because that port starts in the clear and upgrades

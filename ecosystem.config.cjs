@@ -53,6 +53,13 @@ module.exports = {
         ...(process.env.SMTP_FROM ? { SMTP_FROM: process.env.SMTP_FROM } : {}),
         ...(process.env.AUTH_DEV_INBOX_TOKEN ? { AUTH_DEV_INBOX_TOKEN: process.env.AUTH_DEV_INBOX_TOKEN } : {}),
         ...(process.env.CORS_ORIGIN ? { CORS_ORIGIN: process.env.CORS_ORIGIN } : {}),
+        // Server-side request execution. Without these the API sees no allow-list and refuses
+        // every proxied request, so "Send from: Server" silently stops working in production even
+        // though the operator exported the hosts. Left absent when unset, so the API keeps its own
+        // safe default of having the proxy disabled.
+        ...(process.env.PROXY_ALLOWED_HOSTS ? { PROXY_ALLOWED_HOSTS: process.env.PROXY_ALLOWED_HOSTS } : {}),
+        PROXY_TIMEOUT_MS: process.env.PROXY_TIMEOUT_MS || "30000",
+        PROXY_MAX_RESPONSE_BYTES: process.env.PROXY_MAX_RESPONSE_BYTES || "10485760",
       },
     },
   ],

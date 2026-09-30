@@ -28,7 +28,7 @@ const MIN_PEPPER_DISTINCT_CHARACTERS = 5;
 
 const distinctCharacters = (value: string) => new Set(value).size;
 
-const envSchema = z.object({
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
@@ -68,7 +68,9 @@ const envSchema = z.object({
   PROXY_ALLOWED_HOSTS: optionalStringEnv(z.string().min(1)),
   PROXY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000),
   PROXY_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),
-}).superRefine((env, ctx) => {
+});
+
+const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV === "production") {
     if (PUBLISHED_PEPPERS.has(env.AUTH_CODE_PEPPER)) {
       ctx.addIssue({
@@ -100,6 +102,11 @@ const envSchema = z.object({
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+// Every variable this API reads. Exported so deployment wrappers can be checked against it: a
+// setting the operator exports but the wrapper forgets to forward is invisible at startup, and the
+// API simply runs on the default. That is how PM2 silently disabled the server-side proxy.
+export const ENV_KEYS = Object.keys(baseEnvSchema.shape) as (keyof Env)[];
 
 export class EnvValidationError extends Error {
   constructor(public readonly issues: string[]) {
