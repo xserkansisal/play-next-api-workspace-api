@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { HttpError } from "../../src/errors.js";
-import { executeProxyRequest, isHostAllowed, parseAllowedHosts } from "../../src/services/proxy.js";
+import { allowsAnyHost, executeProxyRequest, isHostAllowed, parseAllowedHosts } from "../../src/services/proxy.js";
 
 const baseOptions = {
   allowedHosts: ["localhost:7799"],
@@ -63,6 +63,31 @@ describe("isHostAllowed", () => {
   it("allows nothing when the list is empty", () => {
     expect(isHostAllowed(new URL("http://localhost:7799/x"), [])).toBe(false);
   });
+
+  it("admits every host when the list contains the wildcard", () => {
+    for (const url of ["http://169.254.169.254/latest/meta-data/", "https://example.com/x", "http://10.0.0.5:9000/x"]) {
+      expect(isHostAllowed(new URL(url), ["*"])).toBe(true);
+    }
+    // Still true when the wildcard sits alongside named hosts.
+    expect(isHostAllowed(new URL("http://anything.invalid/x"), ["localhost:7799", "*"])).toBe(true);
+  });
+
+  it("treats only a bare asterisk as a wildcard, not a pattern containing one", () => {
+    // Partial patterns are not supported, and must not be read as permissive: "*.example.com"
+    // would otherwise look like it works while admitting nothing, or worse, everything.
+    expect(isHostAllowed(new URL("http://sub.example.com/x"), ["*.example.com"])).toBe(false);
+    expect(isHostAllowed(new URL("http://192.168.1.5/x"), ["192.168.*"])).toBe(false);
+  });
+});
+
+describe("allowsAnyHost", () => {
+  it("is true only for a bare asterisk entry", () => {
+    expect(allowsAnyHost(["*"])).toBe(true);
+    expect(allowsAnyHost(["localhost:7799", "*"])).toBe(true);
+    expect(allowsAnyHost([])).toBe(false);
+    expect(allowsAnyHost(["localhost:7799"])).toBe(false);
+    expect(allowsAnyHost(["*.example.com"])).toBe(false);
+  });
 });
 
 describe("executeProxyRequest", () => {
@@ -95,6 +120,19 @@ describe("executeProxyRequest", () => {
         "PROXY_UNSUPPORTED_SCHEME",
       );
     }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a non-http scheme under the wildcard, since that defence is not the allow-list", async () => {
+    const fetchImpl = ok();
+    await expectHttpError(
+      executeProxyRequest(
+        { ...request, url: "file:///etc/passwd" },
+        { ...baseOptions, allowedHosts: ["*"], fetchImpl },
+      ),
+      400,
+      "PROXY_UNSUPPORTED_SCHEME",
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

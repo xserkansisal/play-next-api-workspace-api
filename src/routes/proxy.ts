@@ -1,19 +1,21 @@
 import { Router } from "express";
 
 import type { Env } from "../config/env.js";
-import { executeProxyRequest, parseAllowedHosts, proxyRequestSchema } from "../services/proxy.js";
+import { allowsAnyHost, executeProxyRequest, parseAllowedHosts, proxyRequestSchema } from "../services/proxy.js";
 
 export function createProxyRouter(env: Env): Router {
   const router = Router();
   const allowedHosts = parseAllowedHosts(env.PROXY_ALLOWED_HOSTS);
+  const anyHost = allowsAnyHost(allowedHosts);
 
   /**
    * Lets the client show whether server-side execution is available, and which hosts it covers,
-   * instead of only finding out by failing. The list is operator-set configuration, and every
-   * caller here is authenticated.
+   * instead of only finding out by failing. `anyHost` is reported separately so the client can say
+   * "every host" rather than printing a literal `*` and leaving the reader to guess. The list is
+   * operator-set configuration, and every caller here is authenticated.
    */
   router.get("/", (_req, res) => {
-    res.json({ enabled: allowedHosts.length > 0, allowedHosts });
+    res.json({ enabled: allowedHosts.length > 0, anyHost, allowedHosts });
   });
 
   router.post("/", async (req, res, next) => {

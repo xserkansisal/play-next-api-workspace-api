@@ -11,6 +11,15 @@
 //
 //  1. An allow-list, and no proxying at all until an operator sets one. Nothing is implicitly
 //     reachable. This is the whole security boundary; everything below is depth.
+//
+//     An operator who cannot enumerate their targets in advance can set the list to `*`, which
+//     admits every host. That removes the boundary entirely and turns this into an open proxy for
+//     anyone with a session: every host this process can reach, including a cloud metadata
+//     endpoint, a database admin page, or anything else bound to loopback, becomes reachable
+//     through it. It is spelled as a deliberate value rather than a gap in the code so that it
+//     cannot be arrived at by accident, and it is announced at startup rather than kept quiet. It
+//     suits a laptop pointed at a private network; it does not suit a shared or exposed
+//     deployment. The defences below still apply, but they are depth, not a boundary.
 //  2. Redirects are never followed. An allow-listed host could otherwise redirect to a cloud
 //     metadata endpoint or another internal service and smuggle the response back out. The redirect
 //     is returned to the caller as an ordinary response instead, which an API client wants anyway.
@@ -77,8 +86,14 @@ export interface ProxyOptions {
 }
 
 /**
- * Parses `PROXY_ALLOWED_HOSTS`. Entries are `host` (any port) or `host:port`, compared
- * case-insensitively. An empty value leaves the proxy disabled.
+ * The entry that admits every host. Written out rather than inferred from an empty list, because
+ * "unset" must keep meaning "off": a typo in an env file should disable the proxy, never open it.
+ */
+export const ANY_HOST = "*";
+
+/**
+ * Parses `PROXY_ALLOWED_HOSTS`. Entries are `host` (any port), `host:port`, or `*` for every host,
+ * compared case-insensitively. An empty value leaves the proxy disabled.
  */
 export function parseAllowedHosts(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -88,13 +103,19 @@ export function parseAllowedHosts(raw: string | undefined): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/** True when the list contains `*`, so every host is reachable and no allow-list is in force. */
+export function allowsAnyHost(allowedHosts: readonly string[]): boolean {
+  return allowedHosts.includes(ANY_HOST);
+}
+
 /**
- * A target is allowed when the allow-list names its `host:port`, or names the host with no port at
- * all. Matching is exact: no wildcards, and no suffix matching, because `evil-example.com` must not
- * be admitted by an entry for `example.com`.
+ * A target is allowed when the list contains `*`, or names its `host:port`, or names the host with
+ * no port at all. Apart from `*` matching is exact: no partial wildcards, and no suffix matching,
+ * because `evil-example.com` must not be admitted by an entry for `example.com`.
  */
 export function isHostAllowed(url: URL, allowedHosts: readonly string[]): boolean {
   if (allowedHosts.length === 0) return false;
+  if (allowsAnyHost(allowedHosts)) return true;
   const hostname = url.hostname.toLowerCase();
   const defaultPort = url.protocol === "https:" ? "443" : "80";
   const port = url.port || defaultPort;
@@ -176,7 +197,8 @@ export async function executeProxyRequest(request: ProxyRequest, options: ProxyO
     throw new HttpError(
       403,
       `"${url.host}" is not in PROXY_ALLOWED_HOSTS, so this server will not send the request there. ` +
-        "Add it to that setting and restart the API if it should be reachable.",
+        'Add it to that setting and restart the API if it should be reachable, or set the value to "*" ' +
+        "to allow every host.",
       "PROXY_HOST_NOT_ALLOWED",
     );
   }

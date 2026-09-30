@@ -40,7 +40,8 @@ const envSchema = z.object({
   AUTH_DEV_INBOX_TOKEN: optionalStringEnv(z.string().min(32)),
   // Server-side request execution is off until an operator names the hosts it may reach. Empty is
   // the safe default: an open proxy inside a private network is worth more to an attacker than one
-  // on the public internet, because this process can reach hosts they cannot.
+  // on the public internet, because this process can reach hosts they cannot. "*" admits every
+  // host and is announced at startup.
   PROXY_ALLOWED_HOSTS: optionalStringEnv(z.string().min(1)),
   PROXY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000),
   PROXY_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),

@@ -155,7 +155,14 @@ describe("GET /api/v1/proxy", () => {
     const response = await context.api.get("/api/v1/proxy");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ enabled: false, allowedHosts: [] });
+    expect(response.body).toEqual({ enabled: false, anyHost: false, allowedHosts: [] });
+  });
+
+  it("reports the wildcard separately, so the client need not interpret a literal asterisk", async () => {
+    context = await createTestContext(":memory:", { env: { PROXY_ALLOWED_HOSTS: "*" } });
+    const response = await context.api.get("/api/v1/proxy");
+
+    expect(response.body).toEqual({ enabled: true, anyHost: true, allowedHosts: ["*"] });
   });
 
   it("reports the configured hosts so the client can explain what is reachable", async () => {
@@ -163,7 +170,17 @@ describe("GET /api/v1/proxy", () => {
     const response = await ctx.api.get("/api/v1/proxy");
 
     expect(response.body.enabled).toBe(true);
+    expect(response.body.anyHost).toBe(false);
     expect(response.body.allowedHosts).toEqual([`127.0.0.1:${upstreamPort}`]);
+  });
+
+  it("reaches a host that was never named once the wildcard is set", async () => {
+    context = await createTestContext(":memory:", { env: { PROXY_ALLOWED_HOSTS: "*" } });
+    const response = await context.api.post("/api/v1/proxy").send({ method: "GET", url: target("/") });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe(200);
+    expect(lastRequest?.method).toBe("GET");
   });
 
   it("requires authentication", async () => {

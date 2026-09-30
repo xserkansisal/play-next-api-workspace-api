@@ -196,6 +196,22 @@ hosts they cannot — so keep the list to what you actually need.
 PROXY_ALLOWED_HOSTS=localhost:7799,internal-api.example.com
 ```
 
+### Allowing every host
+
+If you cannot name your targets in advance — a local tool pointed at whatever host you happen to be
+testing today — set the value to `*`:
+
+```
+PROXY_ALLOWED_HOSTS=*
+```
+
+Be clear about what that does: it removes the allow-list, which is the only real boundary here.
+Every signed-in user can then make this process send a request to **any host it can reach**,
+including `127.0.0.1`, anything else bound to loopback on that machine, a cloud metadata endpoint,
+and every host on its private network. The API prints a warning at startup when it is set. It is a
+reasonable setting for a laptop you control; it is not a reasonable setting for anything shared or
+exposed. Only `*` on its own is a wildcard — there is no `*.example.com` or `192.168.*`.
+
 What protects you, beyond the allow-list:
 
 - **Redirects are never followed.** An allow-listed host could otherwise redirect to a cloud
