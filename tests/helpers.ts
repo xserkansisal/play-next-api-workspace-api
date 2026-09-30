@@ -28,6 +28,8 @@ export interface TestContextOptions {
   replayBufferSize?: number;
   authenticate?: boolean;
   env?: Partial<Env>;
+  emailSender?: MemoryEmailCodeSender;
+  logger?: (err: unknown) => void;
 }
 
 export async function createTestContext(path = ":memory:", options: TestContextOptions = {}): Promise<TestContext> {
@@ -43,13 +45,13 @@ export async function createTestContext(path = ":memory:", options: TestContextO
     if (value !== undefined) envSource[key] = String(value);
   }
   const env = loadEnv(envSource);
-  const emailSender = new MemoryEmailCodeSender();
+  const emailSender = options.emailSender ?? new MemoryEmailCodeSender();
   const app = createApp({
     env,
     db,
     events,
     emailCodeSender: emailSender,
-    logger: () => {},
+    logger: options.logger ?? (() => {}),
   });
   const server = http.createServer(app);
   await new Promise<void>((resolve, reject) => {

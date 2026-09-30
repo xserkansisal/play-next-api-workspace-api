@@ -98,6 +98,28 @@ The SMTP settings above are examples, not verified organizational settings. Prod
 `SMTP_HOST` and `SMTP_FROM`; `SMTP_USER` and `SMTP_PASSWORD` must be supplied together when the
 relay requires authentication. Do not place secrets in checked-in files or command history.
 
+`SMTP_SECURE` is the setting most often wrong: it means implicit TLS from the first byte, which is
+port `465`. On `587` it must stay `false`, because that port starts in the clear and upgrades
+through STARTTLS - setting it true there produces a connection that hangs or fails rather than a
+message saying the port was wrong.
+
+Verify the relay before anyone depends on it, from the VM and with the same environment the API
+will run with:
+
+```sh
+npm run mail:check
+```
+
+It connects and authenticates without sending, and exits non-zero with the underlying reason on
+failure. A pass rules out an unreachable host, a wrong TLS mode and rejected credentials; it does
+not prove mail is delivered, because relaying rules, SPF/DMARC and recipient filtering all apply
+after this point. Follow it with one real sign-in to an address in an allowed domain
+(`fluttersea.com`, `sisal.com`, `sisal.it`).
+
+If a sign-in code cannot be delivered, the caller receives `503 AUTH_DELIVERY_FAILED` with no
+reason - disclosing it would reveal that the address is eligible. The reason is written to the
+server log, so check PM2's log for the API when users report that codes never arrive.
+
 Sign-in codes are six digits, single-use, hashed with `AUTH_CODE_PEPPER`, valid for 15 minutes
 by default, and invalidated after five failed attempts. Request and verification limits are
 configured per normalized email, not per IP. The application does not trust `X-Forwarded-For`.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { connectSse, startServer } from "../sse.js";
 import { createTestContext, type TestContext } from "../helpers.js";
+import { MemoryEmailCodeSender } from "../../src/auth/email.js";
 
 let ctx: TestContext | undefined;
 
@@ -309,6 +310,27 @@ describe("email code sign-in", () => {
       .set("X-Dev-Inbox-Token", token)
       .expect(200);
     expect(inbox.body.code).toBe(message.code);
+  });
+
+  // A misconfigured SMTP host is otherwise a 503 with the reason discarded, which leaves an
+  // operator setting up mail with nothing to go on. The caller is still told only that delivery
+  // failed, because naming the reason would confirm the address is eligible.
+  it("records why a sign-in code could not be delivered without telling the caller", async () => {
+    const logged: unknown[] = [];
+    const failing = new MemoryEmailCodeSender();
+    failing.sendCode = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:587");
+    };
+    const context = await setup({ emailSender: failing, logger: (err) => logged.push(err) });
+
+    const response = await context.unauthenticatedApi
+      .post("/api/v1/auth/request-code")
+      .send({ email: "person@sisal.com" })
+      .expect(503);
+
+    expect(response.body.error.code).toBe("AUTH_DELIVERY_FAILED");
+    expect(response.body.error.message).not.toContain("ECONNREFUSED");
+    expect(String(logged[0])).toContain("ECONNREFUSED");
   });
 
   // A reverse proxy on the same machine makes every caller look local, which would turn the

@@ -28,6 +28,7 @@ npm run dev            # http://localhost:3000/health
 | `npm run db:migrate`  | Apply pending migrations to `DATABASE_PATH` (the server also applies them on startup) |
 | `npm run db:check`    | Check generated migrations for consistency     |
 | `npm run db:check-name-keys` | Read-only report of stale case-folded name keys and Unicode name collisions (exit 1 on collisions) |
+| `npm run mail:check` | Connects and authenticates against the configured SMTP relay without sending anything (exit 1 on failure) |
 
 See [Deployment and operations](docs/deployment.md) for PM2 deployment, migration, and SQLite backup/restore procedures.
 
@@ -52,7 +53,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `AUTH_SESSION_TTL_SECONDS` | `2592000` | Server-side session lifetime (one month by default) |
 | `AUTH_COOKIE_NAME` | `play_next_session` | Session cookie name |
 | `AUTH_COOKIE_SECURE` | `false` | Adds the cookie's `Secure` attribute when enabled; keep false only for the current HTTP-only internal deployment |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; username and password must be set together |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; setting host and sender switches on real delivery in any mode; username and password must be set together; see "Configuring email delivery" |
 | `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the `/api/v1/auth/dev-inbox` development helper for a directly connected local caller; refused for anything relayed through a proxy; never set in production |
 
 JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
@@ -204,6 +205,48 @@ the address the API sees is nginx's, so a request carrying `X-Forwarded-For`, `X
 `Forwarded` is refused regardless of its apparent address. Without that second check, running a
 development-mode API behind nginx would hand sign-in codes for any eligible address to anyone
 holding the token.
+
+### Configuring email delivery
+
+Six settings, of which two decide everything else:
+
+| Setting | What it is | Notes |
+| --- | --- | --- |
+| `SMTP_HOST` | The relay's hostname | Required for real delivery |
+| `SMTP_FROM` | The envelope/header sender | Required for real delivery; must be an address the relay is willing to send as |
+| `SMTP_PORT` | `587` by default | `587` for STARTTLS, `465` for implicit TLS, `25` for an unauthenticated internal relay |
+| `SMTP_SECURE` | `false` by default | `true` only for an implicit-TLS port such as `465`. On `587` this must stay `false` - the connection still upgrades to TLS via STARTTLS |
+| `SMTP_USER` / `SMTP_PASSWORD` | Credentials | Set **both or neither**; the API refuses to start with one of the two. Omit both for a relay that authorizes by source address |
+
+`SMTP_HOST` and `SMTP_FROM` together are the switch: set them and the API sends real mail; leave
+either unset and it uses an in-memory sender that delivers nothing. That is deliberately not tied
+to `NODE_ENV`, so the settings can be exercised in development rather than first tried in the one
+deployment where a mistake costs the most. Configuring SMTP also withdraws the dev-inbox helper
+automatically, since that helper only reads the in-memory sender.
+
+Define them wherever the process gets its environment: a gitignored `.env` for local work, or the
+exported environment / PM2 ecosystem file on a VM (see
+[Deployment and operations](docs/deployment.md)). They hold a password, so they do not belong in a
+checked-in file or in shell history.
+
+Check them before a user is waiting on a code:
+
+```sh
+npm run mail:check
+```
+
+This opens the connection and authenticates, but sends nothing. It is not a promise that mail
+arrives - relaying rules, SPF/DMARC and recipient filtering are decided after this point, and only
+a real send exercises those. What it does rule out is the majority of setup failures: an
+unreachable host, a `SMTP_SECURE` that does not match the port, and credentials the relay rejects.
+
+Only `fluttersea.com`, `sisal.com` and `sisal.it` addresses can request a code
+(`ALLOWED_EMAIL_DOMAINS` in `src/auth/service.ts`), so a test send has to go to one of those.
+
+If delivery fails, the caller gets `503 AUTH_DELIVERY_FAILED` with no reason - naming it would
+confirm the address is eligible, which the uniform responses exist to avoid. The reason is written
+to the server log instead, because it is a property of this server's configuration and the operator
+is the one who needs it.
 
 Sessions are stored as token hashes and can be revoked server-side. Cookie `Secure` defaults to
 false because the current internal deployment deliberately uses plain HTTP; this means sign-in

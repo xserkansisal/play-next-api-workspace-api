@@ -68,6 +68,7 @@ export function createAuthRouter(
   db: AppDatabase,
   env: AuthEnv,
   sender: EmailCodeSender,
+  logger: (err: unknown) => void = (err) => console.error(err),
 ): Router {
   const router = Router();
   const authConfig: AuthServiceConfig = env;
@@ -79,7 +80,12 @@ export function createAuthRouter(
       const issued = requestCode(db, authConfig, rawEmail);
       try {
         await sender.sendCode({ to: issued.email, code: issued.code, expiresAt: issued.expiresAt });
-      } catch {
+      } catch (err) {
+        // The caller is told only that delivery failed, because naming the reason would confirm the
+        // address is eligible. The operator needs the opposite: a misconfigured SMTP host is
+        // otherwise a 503 with no explanation anywhere, and the reason is a property of this
+        // server's configuration, not of the address that was asked for.
+        logger(new Error(`Failed to deliver a sign-in code via SMTP: ${err instanceof Error ? err.message : String(err)}`));
         invalidateCode(db, issued.challengeId);
         res.status(503).json({ error: { code: "AUTH_DELIVERY_FAILED", message: "Unable to send sign-in code" } });
         return;
