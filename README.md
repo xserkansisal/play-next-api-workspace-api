@@ -53,7 +53,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `AUTH_COOKIE_NAME` | `play_next_session` | Session cookie name |
 | `AUTH_COOKIE_SECURE` | `false` | Adds the cookie's `Secure` attribute when enabled; keep false only for the current HTTP-only internal deployment |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; username and password must be set together |
-| `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the loopback-only `/api/v1/auth/dev-inbox` development helper; never set in production |
+| `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the `/api/v1/auth/dev-inbox` development helper for a directly connected local caller; refused for anything relayed through a proxy; never set in production |
 
 JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
 collection imports. Each individual request body's `content` is still limited to 1,000,000
@@ -197,8 +197,13 @@ SMTP host, port, TLS mode, credentials and sender address are configurable; prod
 provided. SMTP delivery has not been verified against the organization's server. Development and
 tests use an in-memory sender that does not send or log mail. For local development only, set a
 long random `AUTH_DEV_INBOX_TOKEN` to expose the latest unexpired code at
-`GET /api/v1/auth/dev-inbox?email=...`, with the token in `X-Dev-Inbox-Token`; the route is
-loopback-only and is not registered in production.
+`GET /api/v1/auth/dev-inbox?email=...`, with the token in `X-Dev-Inbox-Token`; the route is not
+registered in production, and in development it serves only a genuinely local caller. "Local" has
+to be checked twice: a reverse proxy on the same machine makes every caller look local, because
+the address the API sees is nginx's, so a request carrying `X-Forwarded-For`, `X-Real-IP` or
+`Forwarded` is refused regardless of its apparent address. Without that second check, running a
+development-mode API behind nginx would hand sign-in codes for any eligible address to anyone
+holding the token.
 
 Sessions are stored as token hashes and can be revoked server-side. Cookie `Secure` defaults to
 false because the current internal deployment deliberately uses plain HTTP; this means sign-in

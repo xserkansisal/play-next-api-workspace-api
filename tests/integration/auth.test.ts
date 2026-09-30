@@ -310,4 +310,22 @@ describe("email code sign-in", () => {
       .expect(200);
     expect(inbox.body.code).toBe(message.code);
   });
+
+  // A reverse proxy on the same machine makes every caller look local, which would turn the
+  // loopback restriction into no restriction at all and hand sign-in codes to anyone holding the
+  // token. Verified against a real nginx: without this, a request from another host reached the
+  // route through the proxy and got the code, while the same request sent directly got 404.
+  it.each(["x-forwarded-for", "x-real-ip", "forwarded"])(
+    "refuses the development inbox to a request relayed through a proxy (%s)",
+    async (header) => {
+      const token = "local-dev-inbox-secret-token-that-is-long";
+      const context = await setup({ env: { NODE_ENV: "development", AUTH_DEV_INBOX_TOKEN: token } });
+      const message = await issueCode(context);
+      await context.unauthenticatedApi
+        .get(`/api/v1/auth/dev-inbox?email=${encodeURIComponent(message.to)}`)
+        .set("X-Dev-Inbox-Token", token)
+        .set(header, header === "forwarded" ? "for=203.0.113.9" : "203.0.113.9")
+        .expect(404);
+    },
+  );
 });

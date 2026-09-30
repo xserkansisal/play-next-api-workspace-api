@@ -110,9 +110,11 @@ revisiting TLS.
 
 In development/tests the default sender holds the latest code in memory and never sends/logs it.
 For local manual development, optionally set `AUTH_DEV_INBOX_TOKEN` to a random value of at
-least 32 characters; the development-only loopback route
-`GET /api/v1/auth/dev-inbox?email=...` reveals the current code only when the token is supplied
-in `X-Dev-Inbox-Token`. Never enable this in production.
+least 32 characters; the development-only route `GET /api/v1/auth/dev-inbox?email=...` reveals
+the current code only when the token is supplied in `X-Dev-Inbox-Token` **and** the caller is
+connected directly. A request relayed through a proxy is refused: behind nginx every caller's
+address is nginx's own, so an address check alone would admit the whole network. Never enable
+this in production, and do not assume nginx makes it safe in development either.
 
 Before upgrading a populated database, stop the API and take a verified backup using the
 procedure below. Run the read-only name-key preflight:
@@ -193,6 +195,12 @@ The API does not trust proxy headers or resolve the original client address from
 `X-Forwarded-For`. Behind nginx, it sees nginx's address as the peer. Per-IP rate limiting is
 not implemented; if added, first design a trusted-proxy boundary and client-IP policy. Blindly
 trusting arbitrary forwarded headers could let clients spoof their source address.
+
+There is one place where the peer address is consulted, and it is worth knowing why it is not a
+counter-example: the development-only dev-inbox route. Because a proxy makes every caller look
+local, that route treats the presence of any forwarding header as proof the request was relayed
+and refuses it. That is the one safe direction to read an untrusted header in - it can only close
+the route, never open it - and it is not a basis for trusting these headers anywhere else.
 
 ## SQLite backup and restore
 

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { MemoryEmailCodeSender, type EmailCodeSender } from "../auth/email.js";
@@ -51,6 +51,17 @@ function cookieOptions(env: AuthEnv, maxAgeSeconds: number) {
 
 function isLoopback(address: string | undefined): boolean {
   return address === "::1" || address === "127.0.0.1" || address?.startsWith("::ffff:127.") === true;
+}
+
+// A reverse proxy on the same machine makes every client look like a loopback client, because the
+// address the API sees is the proxy's. The dev inbox hands out sign-in codes, so "this request came
+// from this machine" has to mean it, and behind a proxy it cannot: a forwarding header is proof the
+// request was relayed for somebody else. These headers are attacker-controllable, but only in the
+// direction that closes the route, so trusting them here is safe.
+const FORWARDING_HEADERS = ["x-forwarded-for", "x-real-ip", "forwarded"] as const;
+
+function wasForwarded(req: Request): boolean {
+  return FORWARDING_HEADERS.some((header) => req.get(header) !== undefined);
 }
 
 export function createAuthRouter(
@@ -115,7 +126,11 @@ export function createAuthRouter(
   if (env.NODE_ENV === "development" && env.AUTH_DEV_INBOX_TOKEN && sender instanceof MemoryEmailCodeSender) {
     router.get("/dev-inbox", (req, res) => {
       const supplied = req.get("X-Dev-Inbox-Token") ?? "";
-      if (!isLoopback(req.socket.remoteAddress) || !constantTimeStringEqual(env.AUTH_DEV_INBOX_TOKEN!, supplied)) {
+      if (
+        !isLoopback(req.socket.remoteAddress) ||
+        wasForwarded(req) ||
+        !constantTimeStringEqual(env.AUTH_DEV_INBOX_TOKEN!, supplied)
+      ) {
         res.status(404).end();
         return;
       }
