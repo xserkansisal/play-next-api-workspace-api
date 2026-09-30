@@ -50,6 +50,14 @@ describe("loadEnv", () => {
   it("accepts a CORS origin but rejects values that are not origins", () => {
     expect(loadEnv({ CORS_ORIGIN: "http://localhost:5173" }).CORS_ORIGIN).toBe("http://localhost:5173");
     expect(() => loadEnv({ CORS_ORIGIN: "http://localhost:5173/path" })).toThrow(EnvValidationError);
+    expect(() => loadEnv({ CORS_ORIGIN: "localhost:5173" })).toThrow(EnvValidationError);
+  });
+
+  it('accepts "*" as the one value meaning every origin', () => {
+    expect(loadEnv({ CORS_ORIGIN: "*" }).CORS_ORIGIN).toBe("*");
+    // Only a bare "*" is the wildcard; a pattern is kept as the literal origin it looks like, so a
+    // half-remembered guess cannot quietly open the API to every page on the web.
+    expect(loadEnv({ CORS_ORIGIN: "https://*.example.com" }).CORS_ORIGIN).toBe("https://*.example.com");
   });
 
   it("treats blank optional SMTP/development settings as unset", () => {

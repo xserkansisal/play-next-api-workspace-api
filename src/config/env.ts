@@ -14,10 +14,14 @@ const envSchema = z.object({
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
   DATABASE_PATH: z.string().min(1).default("./data/api.sqlite"),
+  // A bare "*" means every origin; anything else must be a single origin. The two are validated
+  // together so a mistyped wildcard is rejected rather than silently treated as one.
   CORS_ORIGIN: z
     .string()
-    .url()
-    .refine((value) => new URL(value).origin === value, "must be an origin without a path")
+    .refine(
+      (value) => value === "*" || (URL.canParse(value) && new URL(value).origin === value),
+      'must be an origin without a path, or "*" for every origin',
+    )
     .optional(),
   SSE_HEARTBEAT_MS: z.coerce.number().int().min(1000).max(300_000).default(15_000),
   SSE_RETRY_MS: z.coerce.number().int().min(100).max(300_000).default(3_000),

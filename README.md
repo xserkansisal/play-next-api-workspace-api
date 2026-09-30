@@ -41,7 +41,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `HOST`     | `0.0.0.0`     | Bind address; use `127.0.0.1` behind a same-host reverse proxy |
 | `PORT`     | `3000`        | Integer 0–65535                        |
 | `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
-| `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; credentialed requests are allowed only from that origin; not needed for same-origin nginx proxying |
+| `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; credentialed requests are allowed only from that origin; `*` echoes whatever origin calls, see "Allowing every origin"; not needed for same-origin nginx proxying |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
 | `AUTH_CODE_PEPPER` | development-only placeholder | HMAC secret, at least 32 characters; must be explicitly set in production |
@@ -137,6 +137,26 @@ collections, items, environments, Trash, and SSE routes require that cookie. Bro
 `EventSource` connections use cookies; the Vite development origin must be allowed through
 `CORS_ORIGIN` and its client must enable credentials. Credentialed CORS is enabled only for the
 exact configured origin.
+
+### Allowing every origin
+
+If the workspace is opened from an address that is not fixed — a machine's LAN IP, a colleague's
+laptop — set the value to `*`:
+
+```
+CORS_ORIGIN=*
+```
+
+The response still names **the caller's own origin**, never a literal `*`: a browser refuses to
+send credentials to a wildcard, and this API authenticates with a session cookie, so echoing is the
+only form of "any origin" that works here. `Vary: Origin` stops a cache from handing one origin's
+allowance to another. Only a bare `*` is the wildcard — a pattern such as `https://*.example.com`
+is kept as the literal origin it looks like and therefore matches nothing, so a half-remembered
+guess fails closed instead of quietly opening the API. The API prints a warning at startup when it
+is set, because with `*` any page the user visits can call this API with their cookie attached.
+
+Note what this setting is *not*: it governs who may call **this** API. It cannot make some other
+server you are testing send `Access-Control-Allow-Origin` — that header belongs to that server.
 
 SMTP host, port, TLS mode, credentials and sender address are configurable; production requires
 `SMTP_HOST` and `SMTP_FROM`, and accepts SMTP authentication only when both user and password are

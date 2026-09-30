@@ -3,6 +3,7 @@ import { loadEnv } from "./config/env.js";
 import { closeDatabase, openDatabase } from "./db/client.js";
 import { ChangeEventHub } from "./events/hub.js";
 import { allowsAnyHost, parseAllowedHosts } from "./services/proxy.js";
+import { allowsAnyOrigin } from "./middleware/cors.js";
 
 const env = loadEnv();
 const db = openDatabase(env.DATABASE_PATH, { migrate: true });
@@ -16,6 +17,15 @@ if (allowsAnyHost(parseAllowedHosts(env.PROXY_ALLOWED_HOSTS))) {
   console.warn(
     'WARNING: PROXY_ALLOWED_HOSTS is "*", so /api/v1/proxy will send requests to any host. ' +
       "This is an open proxy for every signed-in user. Use it only on a trusted machine.",
+  );
+}
+
+// Announced for the same reason: with "*" any web page the user visits can call this API with
+// their session cookie attached, so a hostile page could act as them.
+if (allowsAnyOrigin(env.CORS_ORIGIN)) {
+  console.warn(
+    'WARNING: CORS_ORIGIN is "*", so any website may call this API with the signed-in user\'s ' +
+      "cookie. Use it only on a trusted machine.",
   );
 }
 
