@@ -4,6 +4,7 @@ import { environments, environmentVariables } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { EnvironmentInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
+import { copyName } from "./copyName.js";
 import type { DbExecutor } from "./tree.js";
 
 export interface EnvironmentVariable {
@@ -144,8 +145,39 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
   );
 }
 
-export function trashEnvironment(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {
+/**
+ * Duplicates an environment under a free name, variables and all.
+ *
+ * The variables are read back rather than copied row by row, because `writeVariables` is already
+ * the one place that decides how a variable list is stored - positions included.
+ */
+export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): Environment {
   return db.transaction(
+    (tx) => {
+      const source = readEnvironment(tx, id);
+      const name = copyName(source.name, (candidate) => findActiveEnvironmentByName(tx, candidate) !== undefined);
+
+      const newEnvironmentId = newId();
+      const timestamp = nowIso();
+      tx.insert(environments)
+        .values({
+          id: newEnvironmentId,
+          name,
+          nameKey: nameKey(name),
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          createdBy: actorId,
+          updatedBy: actorId,
+        })
+        .run();
+      writeVariables(tx, newEnvironmentId, source.variables);
+      return readEnvironment(tx, newEnvironmentId);
+    },
+    { behavior: "immediate" },
+  );
+}
+
+export function trashEnvironment(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {  return db.transaction(
     (tx) => {
       requireActive(tx, id);
       const deletedAt = nowIso();

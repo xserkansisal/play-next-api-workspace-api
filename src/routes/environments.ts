@@ -3,6 +3,7 @@ import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import { authenticatedUserId } from "../middleware/authenticate.js";
 import {
+  cloneEnvironment,
   createEnvironment,
   listEnvironments,
   readEnvironment,
@@ -32,6 +33,12 @@ export function createEnvironmentsRouter(db: AppDatabase, events: ChangeEventHub
     const environment = updateEnvironment(db, req.params.environmentId, environmentInputSchema.parse(req.body), authenticatedUserId(req));
     events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
     res.json(environment);
+  });
+
+  router.post("/:environmentId/clone", (req, res) => {
+    const environment = cloneEnvironment(db, req.params.environmentId, authenticatedUserId(req));
+    events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
+    res.status(201).json(environment);
   });
 
   router.delete("/:environmentId", (req, res) => {

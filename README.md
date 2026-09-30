@@ -88,12 +88,15 @@ folder names (request names may repeat), and case-insensitive unique active envi
 | GET | `/api/v1/collections/:id` | Collection with its active item tree |
 | PUT | `/api/v1/collections/:id` | Save name/description only |
 | DELETE | `/api/v1/collections/:id` | Move collection and its items to Trash |
+| POST | `/api/v1/collections/:id/clone` | Copy the collection and its whole active tree under a free name |
 | POST | `/api/v1/collections/:id/items` | Create a `folder` or `request` (optional `parentId`) |
 | GET | `/api/v1/collections/:id/items/:itemId` | Read one item (folders include their subtree) |
 | PUT | `/api/v1/collections/:id/items/:itemId` | Save one item's own fields; never rewrites the tree |
 | DELETE | `/api/v1/collections/:id/items/:itemId` | Move item (and descendants) to Trash |
+| POST | `/api/v1/collections/:id/items/:itemId/clone` | Copy a folder (with its subtree) or a request, beside the original |
 | GET/POST | `/api/v1/environments` | List / create environments |
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
+| POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
@@ -102,6 +105,20 @@ folder names (request names may repeat), and case-insensitive unique active envi
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
+
+## Making a copy
+
+The three `clone` endpoints duplicate a collection, an item (folder or request), or an
+environment. Each writes the copy in a single transaction, so it either exists whole or not at
+all - a client doing the same thing for a forty-request folder would need forty calls, and a
+failure halfway through would leave the user a half-folder to clean up.
+
+The copy is named `X (copy)`, then `X (copy 2)`, and so on until the name is free. A trailing
+marker on the source is stripped first, so copying `Orders (copy)` gives `Orders (copy 2)` rather
+than nesting markers. Only the root is renamed: everything below it moves to a new parent, where
+its own name cannot collide. A cloned item keeps its source's parent so the copy appears next to
+the original, and the copy is attributed to whoever asked for it, not the original author.
+Trashed rows are left behind.
 
 ## Email code sign-in
 
