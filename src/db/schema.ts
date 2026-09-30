@@ -1,0 +1,238 @@
+import { sql } from "drizzle-orm";
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  type AnySQLiteColumn,
+} from "drizzle-orm/sqlite-core";
+
+// Timestamps are ISO-8601 UTC strings. `name_key` holds a case-folded name used for
+// case-insensitive uniqueness. `trash_root_id` identifies the Trash root a soft-deleted
+// row was moved with, so a whole subtree can be restored together.
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const authCodes = sqliteTable(
+  "auth_codes",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    consumedAt: text("consumed_at"),
+  },
+  (t) => [index("auth_codes_email_created_idx").on(t.email, t.createdAt)],
+);
+
+export const authSessions = sqliteTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    revokedAt: text("revoked_at"),
+  },
+  (t) => [index("auth_sessions_user_idx").on(t.userId), index("auth_sessions_expiry_idx").on(t.expiresAt)],
+);
+
+export const authRateLimits = sqliteTable(
+  "auth_rate_limits",
+  {
+    email: text("email").notNull(),
+    purpose: text("purpose", { enum: ["request_code", "verify_code"] }).notNull(),
+    windowStartedAt: text("window_started_at").notNull(),
+    attempts: integer("attempts").notNull(),
+  },
+  (t) => [primaryKey({ name: "auth_rate_limits_pk", columns: [t.email, t.purpose] })],
+);
+
+export const collections = sqliteTable(
+  "collections",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
+  },
+  (t) => [
+    uniqueIndex("collections_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
+  ],
+);
+
+export const items = sqliteTable(
+  "items",
+  {
+    id: text("id").primaryKey(),
+    collectionId: text("collection_id")
+      .notNull()
+      .references(() => collections.id),
+    parentId: text("parent_id"),
+    // Non-null sibling-group key so root-level folders participate in the unique index.
+    parentKey: text("parent_key")
+      .notNull()
+      .generatedAlwaysAs(sql`coalesce("parent_id", '')`, { mode: "virtual" }),
+    kind: text("kind", { enum: ["folder", "request"] }).notNull(),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+    trashRootId: text("trash_root_id"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
+  },
+  (t) => [
+    check("items_kind_check", sql`"kind" IN ('folder', 'request')`),
+    check("items_trash_state_check", sql`("deleted_at" IS NULL) = ("trash_root_id" IS NULL)`),
+    uniqueIndex("items_id_collection_unique").on(t.id, t.collectionId),
+    // A parent must be an item of the same collection.
+    foreignKey({
+      name: "items_parent_same_collection_fk",
+      columns: [t.parentId, t.collectionId],
+      foreignColumns: [t.id, t.collectionId] as [AnySQLiteColumn, AnySQLiteColumn],
+    }),
+    index("items_collection_parent_idx").on(t.collectionId, t.parentId),
+    index("items_trash_root_idx").on(t.trashRootId),
+    uniqueIndex("items_active_sibling_folder_name_unique")
+      .on(t.collectionId, t.parentKey, t.nameKey)
+      .where(sql`"kind" = 'folder' AND "deleted_at" IS NULL`),
+  ],
+);
+
+export const requestDetails = sqliteTable(
+  "request_details",
+  {
+    itemId: text("item_id")
+      .primaryKey()
+      .references(() => items.id),
+    method: text("method", { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] }).notNull(),
+    url: text("url").notNull(),
+    bodyType: text("body_type", { enum: ["json"] }),
+    bodyContent: text("body_content"),
+    authType: text("auth_type", { enum: ["none"] })
+      .notNull()
+      .default("none"),
+  },
+  () => [
+    check("request_details_method_check", sql`"method" IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')`),
+    check("request_details_auth_check", sql`"auth_type" = 'none'`),
+    check(
+      "request_details_body_check",
+      sql`("body_type" IS NULL AND "body_content" IS NULL) OR ("body_type" = 'json' AND "body_content" IS NOT NULL)`,
+    ),
+  ],
+);
+
+function keyValueRowColumns() {
+  return {
+    requestId: text("request_id")
+      .notNull()
+      .references(() => requestDetails.itemId),
+    position: integer("position").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    description: text("description").notNull().default(""),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  };
+}
+
+export const requestQueryParams = sqliteTable("request_query_params", keyValueRowColumns(), (t) => [
+  primaryKey({ name: "request_query_params_pk", columns: [t.requestId, t.position] }),
+  check("request_query_params_position_check", sql`"position" >= 0`),
+]);
+
+export const requestHeaders = sqliteTable("request_headers", keyValueRowColumns(), (t) => [
+  primaryKey({ name: "request_headers_pk", columns: [t.requestId, t.position] }),
+  check("request_headers_position_check", sql`"position" >= 0`),
+]);
+
+export const environments = sqliteTable(
+  "environments",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+    createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id),
+  },
+  (t) => [
+    uniqueIndex("environments_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
+  ],
+);
+
+export const environmentVariables = sqliteTable(
+  "environment_variables",
+  {
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => environments.id),
+    position: integer("position").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  },
+  (t) => [
+    primaryKey({ name: "environment_variables_pk", columns: [t.environmentId, t.position] }),
+    uniqueIndex("environment_variables_key_unique").on(t.environmentId, t.key),
+    check("environment_variables_position_check", sql`"position" >= 0`),
+  ],
+);
+
+/**
+ * Variables captured out of a response and reused in later requests, held at one of two scopes.
+ *
+ * `user` rows belong to one person and no one else can read or write them; `global` rows are
+ * shared by everyone. They are deliberately separate from `environment_variables`: an environment
+ * is a shared, exportable document, and writing a value captured from one person's session into it
+ * would silently change what every teammate sends.
+ *
+ * A nullable `user_id` carries the distinction rather than two tables, so one query and one route
+ * serve both. The check constraint is what stops the two halves drifting apart - a `user` row with
+ * no owner would be readable by everybody, which is the exact opposite of what the scope means.
+ */
+export const variables = sqliteTable(
+  "variables",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope").notNull(),
+    userId: text("user_id").references(() => users.id),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    updatedBy: text("updated_by").references(() => users.id),
+  },
+  (t) => [
+    check("variables_scope_check", sql`"scope" IN ('user', 'global')`),
+    check(
+      "variables_owner_check",
+      sql`("scope" = 'user' AND "user_id" IS NOT NULL) OR ("scope" = 'global' AND "user_id" IS NULL)`,
+    ),
+    // Partial, so one person's "token" never collides with anybody else's, and the single global
+    // "token" stays single.
+    uniqueIndex("variables_user_key_unique").on(t.userId, t.key).where(sql`"scope" = 'user'`),
+    uniqueIndex("variables_global_key_unique").on(t.key).where(sql`"scope" = 'global'`),
+  ],
+);
