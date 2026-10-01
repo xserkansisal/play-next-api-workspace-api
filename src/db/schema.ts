@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  customType,
   boolean,
   check,
   foreignKey,
@@ -28,7 +29,24 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }).notNull().unique(),
   firstName: varchar("first_name", { length: 320 }).notNull().default(""),
   lastName: varchar("last_name", { length: 320 }).notNull().default(""),
+  avatarColor: varchar("avatar_color", { length: 16 }).notNull().default("violet"),
   createdAt: timestamp("created_at").notNull(),
+});
+
+const mediumBlob = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "mediumblob",
+});
+
+// One processed image per user. The id changes on every upload so avatar URLs can be cached
+// forever and a replacement can never be served from a stale cache entry.
+export const userAvatars = mysqlTable("user_avatars", {
+  userId: id("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  id: id("id").notNull().unique(),
+  contentType: varchar("content_type", { length: 32 }).notNull(),
+  data: mediumBlob("data").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });
 
 export const authCodes = mysqlTable(

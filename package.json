@@ -25,13 +25,16 @@
   "dependencies": {
     "drizzle-orm": "^0.45.3",
     "express": "^5.2.1",
+    "multer": "^2.4.0",
     "mysql2": "^3.24.5",
     "nodemailer": "^10.0.12",
     "quickjs-emscripten": "^0.32.0",
+    "sharp": "^0.35.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
     "@types/node": "^22.20.4",
     "@types/supertest": "^7.2.1",
     "drizzle-kit": "^0.31.11",

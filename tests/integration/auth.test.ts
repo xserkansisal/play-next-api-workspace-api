@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { connectSse, startServer } from "../sse.js";
 import { createTestContext, dropTestDatabase, queryRows, type TestContext } from "../helpers.js";
 import { MemoryEmailCodeSender } from "../../src/auth/email.js";
+import sharp from "sharp";
 
 let ctx: TestContext | undefined;
 
@@ -191,6 +192,156 @@ describe("email code sign-in", () => {
       .expect(400);
     const login = await verify(context, email, message.code).expect(200);
     expect(login.body.user).toMatchObject({ firstName: "Client", lastName: "Names" });
+  });
+
+  it("updates only the signed-in user's avatar colour", async () => {
+    const context = await setup();
+    const message = await issueCode(context, "avatar.user@sisal.com");
+    const login = await verify(context, message.to, message.code).expect(200);
+    expect(login.body.user.avatarColor).toBe("violet");
+    const cookie = cookiePair(setCookieHeader(login));
+
+    const updated = await context.unauthenticatedApi
+      .patch("/api/v1/auth/me/profile")
+      .set("Cookie", cookie)
+      .send({ avatarColor: "teal" })
+      .expect(200);
+    expect(updated.body.user).toEqual({ ...login.body.user, avatarColor: "teal" });
+
+    const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
+    expect(me.body.user.avatarColor).toBe("teal");
+
+    for (const body of [{ avatarColor: "black" }, { avatarColor: "blue", firstName: "Changed" }, { email: "x@sisal.com" }, {}]) {
+      const rejected = await context.unauthenticatedApi
+        .patch("/api/v1/auth/me/profile")
+        .set("Cookie", cookie)
+        .send(body)
+        .expect(400);
+      expect(rejected.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    const unchanged = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
+    expect(unchanged.body.user).toEqual({ ...login.body.user, avatarColor: "teal" });
+
+    await context.unauthenticatedApi.patch("/api/v1/auth/me/profile").send({ avatarColor: "blue" }).expect(401);
+  });
+
+  describe("profile photo", () => {
+    async function signedIn(context: TestContext, email = "photo.user@sisal.com") {
+      const message = await issueCode(context, email);
+      const login = await verify(context, message.to, message.code).expect(200);
+      return { cookie: cookiePair(setCookieHeader(login)), user: login.body.user };
+    }
+
+    function image(format: "jpeg" | "png" | "webp", width = 64, height = 32) {
+      return sharp({ create: { width, height, channels: 3, background: "#3366cc" } })
+        .withMetadata({ exif: { IFD0: { Copyright: "secret-metadata" } } })
+        [format]()
+        .toBuffer();
+    }
+
+    function upload(context: TestContext, cookie: string, file: Buffer, filename = "photo.png", contentType = "image/png") {
+      return context.unauthenticatedApi
+        .post("/api/v1/auth/me/avatar")
+        .set("Cookie", cookie)
+        .attach("avatar", file, { filename, contentType });
+    }
+
+    it("stores JPEG, PNG and WebP uploads as metadata-free WebP and returns avatarUrl", async () => {
+      const context = await setup();
+      const { cookie, user } = await signedIn(context);
+      expect(user.avatarUrl).toBeNull();
+
+      const urls: string[] = [];
+      for (const format of ["jpeg", "png", "webp"] as const) {
+        // The declared type is deliberately wrong: the server must go by the file's bytes.
+        const response = await upload(context, cookie, await image(format), "x.txt", "text/plain").expect(200);
+        expect(response.body.user).toEqual({ ...user, avatarUrl: expect.stringMatching(/^\/api\/v1\/auth\/avatars\/[0-9a-f-]{36}$/) });
+        urls.push(response.body.user.avatarUrl);
+      }
+      expect(new Set(urls).size).toBe(3);
+      expect((await queryRows(context.db, "SELECT COUNT(*) AS count FROM user_avatars"))[0]!.count).toBe(1);
+
+      await context.unauthenticatedApi.get(urls[0]!).set("Cookie", cookie).expect(404);
+      const served = await context.unauthenticatedApi
+        .get(urls[2]!)
+        .set("Cookie", cookie)
+        .buffer(true)
+        .parse((res, done) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => done(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(served.headers["content-type"]).toBe("image/webp");
+      expect(served.headers["cache-control"]).toContain("immutable");
+      const metadata = await sharp(served.body as Buffer).metadata();
+      expect(metadata).toMatchObject({ format: "webp", width: 512, height: 512 });
+      expect(metadata.exif).toBeUndefined();
+      expect((served.body as Buffer).includes("secret-metadata")).toBe(false);
+
+      await context.unauthenticatedApi.get(urls[2]!).expect(401);
+      const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
+      expect(me.body.user.avatarUrl).toBe(urls[2]);
+    });
+
+    it("removes the stored photo and falls back to the saved colour", async () => {
+      const context = await setup();
+      const { cookie, user } = await signedIn(context);
+      const uploaded = await upload(context, cookie, await image("png")).expect(200);
+      const removed = await context.unauthenticatedApi.delete("/api/v1/auth/me/avatar").set("Cookie", cookie).expect(200);
+      expect(removed.body.user).toEqual({ ...user, avatarUrl: null });
+      expect((await queryRows(context.db, "SELECT COUNT(*) AS count FROM user_avatars"))[0]!.count).toBe(0);
+      await context.unauthenticatedApi.get(uploaded.body.user.avatarUrl).set("Cookie", cookie).expect(404);
+      await context.unauthenticatedApi.delete("/api/v1/auth/me/avatar").set("Cookie", cookie).expect(200);
+    });
+
+    it("rejects unsupported, corrupt, oversized and malformed uploads", async () => {
+      const context = await setup();
+      const { cookie } = await signedIn(context);
+      const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+      expect((await upload(context, cookie, svg, "a.png", "image/png").expect(415)).body.error.code).toBe("AVATAR_UNSUPPORTED_TYPE");
+      const gif = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#000" } }).gif().toBuffer();
+      expect((await upload(context, cookie, gif).expect(415)).body.error.code).toBe("AVATAR_UNSUPPORTED_TYPE");
+
+      const png = await image("png");
+      const corrupt = Buffer.concat([png.subarray(0, 40), Buffer.alloc(200, 7)]);
+      expect((await upload(context, cookie, corrupt).expect(400)).body.error.code).toBe("AVATAR_INVALID_IMAGE");
+
+      const oversized = Buffer.concat([png, Buffer.alloc(5 * 1024 * 1024)]);
+      expect((await upload(context, cookie, oversized).expect(413)).body.error.code).toBe("AVATAR_TOO_LARGE");
+
+      const wrongField = await context.unauthenticatedApi
+        .post("/api/v1/auth/me/avatar")
+        .set("Cookie", cookie)
+        .attach("photo", png, "a.png")
+        .expect(400);
+      expect(wrongField.body.error.code).toBe("AVATAR_UPLOAD_INVALID");
+      await context.unauthenticatedApi.post("/api/v1/auth/me/avatar").set("Cookie", cookie).send({}).expect(400);
+      expect((await queryRows(context.db, "SELECT COUNT(*) AS count FROM user_avatars"))[0]!.count).toBe(0);
+    });
+
+    it("requires a session for upload and removal", async () => {
+      const context = await setup();
+      await context.unauthenticatedApi.post("/api/v1/auth/me/avatar").attach("avatar", await image("png"), "a.png").expect(401);
+      await context.unauthenticatedApi.delete("/api/v1/auth/me/avatar").expect(401);
+    });
+
+    it("returns an absolute URL to browsers on the allowed cross-origin client", async () => {
+      const context = await setup({ env: { CORS_ORIGIN: "http://localhost:5173" } });
+      const { cookie } = await signedIn(context);
+      const response = await upload(context, cookie, await image("png")).set("Origin", "http://localhost:5173").expect(200);
+      expect(response.body.user.avatarUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/v1\/auth\/avatars\//);
+    });
+  });
+
+  it("allows PATCH in CORS preflight responses", async () => {
+    const context = await setup({ env: { CORS_ORIGIN: "http://localhost:5173" } });
+    const preflight = await context.unauthenticatedApi
+      .options("/api/v1/auth/me/profile")
+      .set("Origin", "http://localhost:5173")
+      .set("Access-Control-Request-Method", "PATCH")
+      .expect(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("PATCH");
   });
 
   it("rejects expired sessions", async () => {

@@ -1,4 +1,5 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type RequestHandler } from "express";
+import multer from "multer";
 import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { MemoryEmailCodeSender, type EmailCodeSender } from "../auth/email.js";
@@ -7,12 +8,20 @@ import {
   requestCode,
   revokeSession,
   validateAllowedEmail,
+  deleteUserAvatar,
+  findAvatarImage,
+  replaceUserAvatar,
+  updateUserAvatarColor,
   verifyCode,
   type AuthServiceConfig,
+  type AuthUser,
 } from "../auth/service.js";
 import { constantTimeStringEqual } from "../auth/crypto.js";
-import { createAuthenticationMiddleware, readCookie } from "../middleware/authenticate.js";
-import { emailInputSchema, verifyCodeInputSchema } from "../validation/authSchemas.js";
+import { AVATAR_CONTENT_TYPE, AVATAR_MAX_BYTES, processAvatarImage } from "../auth/avatarImage.js";
+import { HttpError } from "../errors.js";
+import { allowsAnyOrigin } from "../middleware/cors.js";
+import { authenticatedUserId, createAuthenticationMiddleware, readCookie } from "../middleware/authenticate.js";
+import { emailInputSchema, updateProfileInputSchema, verifyCodeInputSchema } from "../validation/authSchemas.js";
 
 type AuthEnv = Pick<
   Env,
@@ -28,7 +37,48 @@ type AuthEnv = Pick<
   | "AUTH_COOKIE_NAME"
   | "AUTH_COOKIE_SECURE"
   | "AUTH_DEV_INBOX_TOKEN"
+  | "CORS_ORIGIN"
 >;
+
+const AVATAR_PATH = "/api/v1/auth/avatars";
+
+/**
+ * Same-origin clients (the nginx deployment) get a root-relative URL. A browser on another
+ * allowed origin - the Vite dev server - would resolve that against its own origin, so it gets
+ * this API's absolute URL instead.
+ */
+function avatarUrl(req: Request, env: AuthEnv, avatarId: string | null): string | null {
+  if (!avatarId) return null;
+  const path = `${AVATAR_PATH}/${avatarId}`;
+  const origin = req.get("Origin");
+  const crossOrigin =
+    !!origin && !!env.CORS_ORIGIN && (allowsAnyOrigin(env.CORS_ORIGIN) || origin === env.CORS_ORIGIN);
+  return crossOrigin ? `${req.protocol}://${req.get("host")}${path}` : path;
+}
+
+function publicUser(req: Request, env: AuthEnv, user: AuthUser) {
+  const { avatarId, ...profile } = user;
+  return { ...profile, avatarUrl: avatarUrl(req, env, avatarId) };
+}
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_BYTES, files: 1, fields: 0, parts: 1 },
+}).single("avatar");
+
+const parseAvatarUpload: RequestHandler = (req, res, next) => {
+  avatarUpload(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      next(new HttpError(413, "Avatar images must be 5 MB or smaller", "AVATAR_TOO_LARGE"));
+      return;
+    }
+    next(new HttpError(400, "Send one image file in the multipart field \"avatar\"", "AVATAR_UPLOAD_INVALID"));
+  });
+};
 
 function appendCookie(
   name: string,
@@ -112,14 +162,66 @@ export function createAuthRouter(
         "Set-Cookie",
         appendCookie(env.AUTH_COOKIE_NAME, outcome.session.sessionToken, cookieOptions(env, env.AUTH_SESSION_TTL_SECONDS)),
       );
-      res.status(200).json({ user: outcome.session.user, expiresAt: outcome.session.expiresAt });
+      res.status(200).json({ user: publicUser(req, env, outcome.session.user), expiresAt: outcome.session.expiresAt });
     } catch (err) {
       next(err);
     }
   });
 
   router.get("/me", requireAuth, (req, res) => {
-    res.json({ user: req.authUser });
+    res.json({ user: publicUser(req, env, req.authUser!) });
+  });
+
+  // Only the avatar colour is editable; names and email are derived server-side and the strict
+  // schema rejects any attempt to send them.
+  router.patch("/me/profile", requireAuth, async (req, res, next) => {
+    try {
+      const { avatarColor } = updateProfileInputSchema.parse(req.body);
+      const user = await updateUserAvatarColor(db, authenticatedUserId(req), avatarColor);
+      res.json({ user: publicUser(req, env, user) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/me/avatar", requireAuth, parseAvatarUpload, async (req, res, next) => {
+    try {
+      if (!req.file) {
+        throw new HttpError(400, "Send one image file in the multipart field \"avatar\"", "AVATAR_UPLOAD_INVALID");
+      }
+      const data = await processAvatarImage(req.file.buffer);
+      const user = await replaceUserAvatar(db, authenticatedUserId(req), { contentType: AVATAR_CONTENT_TYPE, data });
+      res.json({ user: publicUser(req, env, user) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete("/me/avatar", requireAuth, async (req, res, next) => {
+    try {
+      const user = await deleteUserAvatar(db, authenticatedUserId(req));
+      res.json({ user: publicUser(req, env, user) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get("/avatars/:avatarId", requireAuth, async (req, res, next) => {
+    try {
+      const image = await findAvatarImage(db, String(req.params.avatarId));
+      if (!image) {
+        res.status(404).json({ error: { code: "AVATAR_NOT_FOUND", message: "Avatar not found" } });
+        return;
+      }
+      // Every upload gets a new id, so a URL's bytes never change and may be cached indefinitely.
+      res.setHeader("Content-Type", image.contentType);
+      res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+      res.send(image.data);
+    } catch (err) {
+      next(err);
+    }
   });
 
   router.post("/sign-out", async (req, res) => {

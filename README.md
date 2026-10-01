@@ -88,6 +88,10 @@ Scoped variables retain one key per user and one global value per key.
 | POST | `/api/v1/auth/request-code` | Request a sign-in code by email |
 | POST | `/api/v1/auth/verify-code` | Verify a code, return the current user's profile, and issue the session cookie |
 | GET | `/api/v1/auth/me` | Read the current signed-in user's persisted profile |
+| PATCH | `/api/v1/auth/me/profile` | Set the signed-in user's `avatarColor` (`violet`, `blue`, `green`, `orange`, `rose`, `teal`); returns `{ user }` |
+| POST | `/api/v1/auth/me/avatar` | Upload a profile photo (`multipart/form-data`, field `avatar`; JPEG, PNG or WebP up to 5 MB, checked by file signature). Stored re-encoded as a metadata-free 512×512 WebP; returns `{ user }` with `avatarUrl` |
+| DELETE | `/api/v1/auth/me/avatar` | Remove the profile photo; returns `{ user }` with `avatarUrl: null` |
+| GET | `/api/v1/auth/avatars/:avatarId` | Serve a stored avatar image (signed-in users; URL changes on every upload, so responses are cached as immutable) |
 | POST | `/api/v1/auth/sign-out` | Revoke the current server-side session |
 | GET | `/api/v1/collections` | Active collections (metadata) |
 | POST | `/api/v1/collections` | Create a collection, optionally with a nested `items` tree (atomic) |

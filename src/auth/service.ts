@@ -3,11 +3,12 @@ import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { first } from "../db/query.js";
-import { authCodes, authRateLimits, authSessions, users } from "../db/schema.js";
+import { authCodes, authRateLimits, authSessions, userAvatars, users } from "../db/schema.js";
 import type { DbExecutor } from "../services/tree.js";
 import { generateCode, generateSessionToken, hashCode, hashSessionToken, normalizeEmail, verifyCodeHash } from "./crypto.js";
 import { HttpError } from "../errors.js";
 import { deriveUserProfileName } from "./profile.js";
+import type { AvatarColor } from "./avatar.js";
 
 export const ALLOWED_EMAIL_DOMAINS = ["fluttersea.com", "sisal.com", "sisal.it"] as const;
 
@@ -16,7 +17,19 @@ export interface AuthUser {
   email: string;
   firstName: string;
   lastName: string;
+  avatarColor: string;
+  /** Id of the stored avatar image, or null when the user has none. Clients see it as `avatarUrl`. */
+  avatarId: string | null;
 }
+
+const authUserColumns = {
+  id: users.id,
+  email: users.email,
+  firstName: users.firstName,
+  lastName: users.lastName,
+  avatarColor: users.avatarColor,
+  avatarId: userAvatars.id,
+};
 
 export class AuthError extends HttpError {
   constructor(status: number, code: string, message: string) {
@@ -204,6 +217,7 @@ export async function verifyCode(
       .onDuplicateKeyUpdate({ set: { email } });
     const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
     if (!user) throw new Error("User row disappeared while a verified session was being created");
+    const avatar = await first(tx.select({ id: userAvatars.id }).from(userAvatars).where(eq(userAvatars.userId, user.id)).limit(1));
     const firstName = user.firstName || profileName.firstName;
     const lastName = user.lastName || profileName.lastName;
     if (firstName !== user.firstName || lastName !== user.lastName) {
@@ -220,7 +234,7 @@ export async function verifyCode(
     return {
       ok: true,
       session: {
-        user: { id: user.id, email: user.email, firstName, lastName },
+        user: { id: user.id, email: user.email, firstName, lastName, avatarColor: user.avatarColor, avatarId: avatar?.id ?? null },
         sessionToken: generatedSessionToken,
         expiresAt: sessionExpiresAt,
       },
@@ -235,9 +249,10 @@ export async function findSessionUser(
 ): Promise<AuthUser | undefined> {
   return first(
     db
-      .select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName })
+      .select(authUserColumns)
       .from(authSessions)
       .innerJoin(users, eq(authSessions.userId, users.id))
+      .leftJoin(userAvatars, eq(userAvatars.userId, users.id))
       .where(
         and(
           eq(authSessions.tokenHash, hashSessionToken(token)),
@@ -266,9 +281,54 @@ export async function invalidateCode(db: AppDatabase, challengeId: string, now =
 export async function userForId(db: AppDatabase, id: string): Promise<AuthUser | undefined> {
   return first(
     db
-      .select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName })
+      .select(authUserColumns)
       .from(users)
+      .leftJoin(userAvatars, eq(userAvatars.userId, users.id))
       .where(eq(users.id, id))
+      .limit(1),
+  );
+}
+
+async function requireUser(db: AppDatabase, id: string): Promise<AuthUser> {
+  const user = await userForId(db, id);
+  if (!user) throw new AuthError(401, "AUTHENTICATION_REQUIRED", "Sign-in required");
+  return user;
+}
+
+export async function updateUserAvatarColor(db: AppDatabase, id: string, avatarColor: AvatarColor): Promise<AuthUser> {
+  await db.update(users).set({ avatarColor }).where(eq(users.id, id));
+  return requireUser(db, id);
+}
+
+/** Stores the processed image, replacing (not orphaning) any previous one for the same user. */
+export async function replaceUserAvatar(
+  db: AppDatabase,
+  userId: string,
+  image: { contentType: string; data: Buffer },
+  now = new Date().toISOString(),
+): Promise<AuthUser> {
+  const avatarId = randomUUID();
+  await db
+    .insert(userAvatars)
+    .values({ userId, id: avatarId, contentType: image.contentType, data: image.data, updatedAt: now })
+    .onDuplicateKeyUpdate({ set: { id: avatarId, contentType: image.contentType, data: image.data, updatedAt: now } });
+  return requireUser(db, userId);
+}
+
+export async function deleteUserAvatar(db: AppDatabase, userId: string): Promise<AuthUser> {
+  await db.delete(userAvatars).where(eq(userAvatars.userId, userId));
+  return requireUser(db, userId);
+}
+
+export async function findAvatarImage(
+  db: AppDatabase,
+  avatarId: string,
+): Promise<{ contentType: string; data: Buffer } | undefined> {
+  return first(
+    db
+      .select({ contentType: userAvatars.contentType, data: userAvatars.data })
+      .from(userAvatars)
+      .where(eq(userAvatars.id, avatarId))
       .limit(1),
   );
 }
