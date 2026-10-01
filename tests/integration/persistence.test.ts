@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTempDir, createTestContext, requestFields, type TestContext } from "../helpers.js";
+import { createTempDir, createTestContext, dropTestDatabase, queryRows, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
 beforeEach(async () => {
@@ -8,19 +8,20 @@ beforeEach(async () => {
 });
 afterEach(async () => ctx.close());
 
-function failOn(table: string, event: "INSERT" | "UPDATE" | "DELETE") {
-  ctx.db.$client.exec(
-    `CREATE TRIGGER fail_${table}_${event.toLowerCase()} BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT, 'injected failure'); END;`,
+async function failOn(table: string, event: "INSERT" | "UPDATE" | "DELETE") {
+  await ctx.db.$client.query(
+    `CREATE TRIGGER fail_${table}_${event.toLowerCase()} BEFORE ${event} ON ${table} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected failure'`,
   );
 }
 
-function snapshot() {
+async function snapshot() {
   const tables = ["collections", "items", "request_details", "request_query_params", "request_headers", "environments", "environment_variables"];
-  return Object.fromEntries(tables.map((t) => [t, ctx.db.$client.prepare(`SELECT * FROM ${t}`).all()]));
+  const rows = await Promise.all(tables.map((table) => queryRows(ctx.db, `SELECT * FROM ${table} ORDER BY 1`)));
+  return Object.fromEntries(tables.map((table, index) => [table, rows[index]!]));
 }
 
 describe("persistence across reopen", () => {
-  it("keeps collections, items, environments, and Trash state in the SQLite file", async () => {
+  it("keeps collections, items, environments, and Trash state in MySQL across pool reopen", async () => {
     const tmp = createTempDir();
     const path = join(tmp.dir, "nested", "api.sqlite");
     try {
@@ -45,6 +46,7 @@ describe("persistence across reopen", () => {
         await second.close();
       }
     } finally {
+      await dropTestDatabase(path);
       tmp.cleanup();
     }
   });
@@ -59,23 +61,23 @@ describe("transaction atomicity", () => {
         .send({ type: "request", name: "R", ...requestFields, headers: [{ key: "old", value: "1" }] })
         .expect(201)
     ).body;
-    const before = snapshot();
-    failOn("request_headers", "INSERT");
+    const before = await snapshot();
+    await failOn("request_headers", "INSERT");
 
     await ctx.api
       .put(`/api/v1/collections/${col.id}/items/${req.id}`)
       .send({ type: "request", name: "Renamed", ...requestFields, headers: [{ key: "new", value: "2" }] })
       .expect(500);
-    expect(snapshot()).toEqual(before);
+    expect(await snapshot()).toEqual(before);
   });
 
   it("rolls back a nested collection create when a deep insert fails", async () => {
-    failOn("request_query_params", "INSERT");
+    await failOn("request_query_params", "INSERT");
     await ctx.api
       .post("/api/v1/collections")
       .send({ name: "C", items: [{ type: "folder", name: "F", items: [{ type: "request", name: "R", ...requestFields, queryParams: [{ key: "q", value: "1" }] }] }] })
       .expect(500);
-    expect(Object.values(snapshot()).every((rows) => rows.length === 0)).toBe(true);
+    expect(Object.values(await snapshot()).every((rows) => rows.length === 0)).toBe(true);
   });
 
   it("rolls back a subtree Trash move and a subtree restore when a step fails", async () => {
@@ -85,26 +87,26 @@ describe("transaction atomicity", () => {
         .send({ name: "C", items: [{ type: "folder", name: "F", items: [{ type: "request", name: "R", ...requestFields }] }] })
         .expect(201)
     ).body;
-    let before = snapshot();
-    failOn("collections", "UPDATE");
+    let before = await snapshot();
+    await failOn("collections", "UPDATE");
     await ctx.api.delete(`/api/v1/collections/${col.id}`).expect(500);
-    expect(snapshot()).toEqual(before);
+    expect(await snapshot()).toEqual(before);
 
-    ctx.db.$client.exec("DROP TRIGGER fail_collections_update");
+    await ctx.db.$client.query("DROP TRIGGER fail_collections_update");
     await ctx.api.delete(`/api/v1/collections/${col.id}`).expect(204);
-    before = snapshot();
-    ctx.db.$client.exec(
-      "CREATE TRIGGER fail_restore BEFORE UPDATE ON items WHEN NEW.deleted_at IS NULL BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+    before = await snapshot();
+    await ctx.db.$client.query(
+      "CREATE TRIGGER fail_restore BEFORE UPDATE ON items FOR EACH ROW BEGIN IF NEW.deleted_at IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected failure'; END IF; END",
     );
     await ctx.api.post(`/api/v1/trash/${col.id}/restore`).send({ collectionName: "Renamed" }).expect(500);
-    expect(snapshot()).toEqual(before);
+    expect(await snapshot()).toEqual(before);
   });
 
   it("rolls back an environment save when variable insertion fails", async () => {
     const env = (await ctx.api.post("/api/v1/environments").send({ name: "E", variables: [{ key: "a", value: "1" }] }).expect(201)).body;
-    const before = snapshot();
-    failOn("environment_variables", "INSERT");
+    const before = await snapshot();
+    await failOn("environment_variables", "INSERT");
     await ctx.api.put(`/api/v1/environments/${env.id}`).send({ name: "E2", variables: [{ key: "b", value: "2" }] }).expect(500);
-    expect(snapshot()).toEqual(before);
+    expect(await snapshot()).toEqual(before);
   });
 });

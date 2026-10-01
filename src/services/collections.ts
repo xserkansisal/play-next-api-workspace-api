@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
+import { first } from "../db/query.js";
 import { collections, items } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { CreateCollectionInput, UpdateCollectionInput } from "../validation/schemas.js";
@@ -22,38 +23,33 @@ export interface CollectionAggregate extends CollectionSummary {
 
 type CollectionRow = typeof collections.$inferSelect;
 
-function toSummary(db: DbExecutor, row: CollectionRow): CollectionSummary {
+async function toSummary(db: DbExecutor, row: CollectionRow): Promise<CollectionSummary> {
   return {
     id: row.id,
     name: row.name,
     description: row.description,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    ...resolveAttribution(db, row.createdBy, row.updatedBy),
+    ...await resolveAttribution(db, row.createdBy, row.updatedBy),
   };
 }
 
-export function findActiveCollection(db: DbExecutor, id: string): CollectionRow | undefined {
-  return db
-    .select()
-    .from(collections)
-    .where(and(eq(collections.id, id), isNull(collections.deletedAt)))
-    .get();
+export function findActiveCollection(db: DbExecutor, id: string): Promise<CollectionRow | undefined> {
+  return first(db.select().from(collections).where(and(eq(collections.id, id), isNull(collections.deletedAt))).limit(1));
 }
 
-export function requireActiveCollection(db: DbExecutor, id: string): CollectionRow {
-  const row = findActiveCollection(db, id);
+export async function requireActiveCollection(db: DbExecutor, id: string): Promise<CollectionRow> {
+  const row = await findActiveCollection(db, id);
   if (!row) throw new NotFoundError(`Collection ${id} not found`);
   return row;
 }
 
-export function findActiveCollectionByName(db: DbExecutor, name: string, excludeId?: string): CollectionRow | undefined {
-  return db
+export async function findActiveCollectionByName(db: DbExecutor, name: string, excludeId?: string): Promise<CollectionRow | undefined> {
+  const rows = await db
     .select()
     .from(collections)
-    .where(and(eq(collections.nameKey, nameKey(name)), isNull(collections.deletedAt)))
-    .all()
-    .find((row) => row.id !== excludeId);
+    .where(and(eq(collections.nameKey, nameKey(name)), isNull(collections.deletedAt)));
+  return rows.find((row) => row.id !== excludeId);
 }
 
 export function collectionNameConflictError(name: string, existingId: string): ConflictError {
@@ -63,30 +59,28 @@ export function collectionNameConflictError(name: string, existingId: string): C
   });
 }
 
-export function listCollections(db: AppDatabase): CollectionSummary[] {
-  return db
+export async function listCollections(db: AppDatabase): Promise<CollectionSummary[]> {
+  const rows = await db
     .select()
     .from(collections)
-    .where(isNull(collections.deletedAt))
-    .all()
-    .map((row) => toSummary(db, row))
-    .sort(compareByName);
+    .where(isNull(collections.deletedAt));
+  return (await Promise.all(rows.map((row) => toSummary(db, row)))).sort(compareByName);
 }
 
-export function readCollection(db: DbExecutor, id: string): CollectionAggregate {
-  const row = requireActiveCollection(db, id);
-  return { ...toSummary(db, row), items: loadActiveTree(db, id).roots };
+export async function readCollection(db: DbExecutor, id: string): Promise<CollectionAggregate> {
+  const row = await requireActiveCollection(db, id);
+  const [summary, tree] = await Promise.all([toSummary(db, row), loadActiveTree(db, id)]);
+  return { ...summary, items: tree.roots };
 }
 
-export function createCollection(db: AppDatabase, input: CreateCollectionInput, actorId: string): CollectionAggregate {
-  return db.transaction(
-    (tx) => {
-      const existing = findActiveCollectionByName(tx, input.name);
+export function createCollection(db: AppDatabase, input: CreateCollectionInput, actorId: string): Promise<CollectionAggregate> {
+  return db.transaction(async (tx) => {
+      const existing = await findActiveCollectionByName(tx, input.name);
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
       const id = newId();
       const timestamp = nowIso();
-      tx.insert(collections)
+      await tx.insert(collections)
         .values({
           id,
           name: input.name,
@@ -97,23 +91,20 @@ export function createCollection(db: AppDatabase, input: CreateCollectionInput, 
           createdBy: actorId,
           updatedBy: actorId,
         })
-        .run();
-      insertTree(tx, id, null, input.items, timestamp, actorId);
+        ;
+      await insertTree(tx, id, null, input.items, timestamp, actorId);
       return readCollection(tx, id);
-    },
-    { behavior: "immediate" },
-  );
+    });
 }
 
 /** Saves collection-level metadata only; the item tree is never touched. */
-export function updateCollection(db: AppDatabase, id: string, input: UpdateCollectionInput, actorId: string): CollectionSummary {
-  return db.transaction(
-    (tx) => {
-      requireActiveCollection(tx, id);
-      const existing = findActiveCollectionByName(tx, input.name, id);
+export function updateCollection(db: AppDatabase, id: string, input: UpdateCollectionInput, actorId: string): Promise<CollectionSummary> {
+  return db.transaction(async (tx) => {
+      await requireActiveCollection(tx, id);
+      const existing = await findActiveCollectionByName(tx, input.name, id);
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
-      tx.update(collections)
+      await tx.update(collections)
         .set({
           name: input.name,
           nameKey: nameKey(input.name),
@@ -122,26 +113,21 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
           updatedBy: actorId,
         })
         .where(eq(collections.id, id))
-        .run();
-      return toSummary(tx, requireActiveCollection(tx, id));
-    },
-    { behavior: "immediate" },
-  );
+        ;
+      return toSummary(tx, await requireActiveCollection(tx, id));
+    });
 }
 
 /** Moves a collection and all of its active items to Trash as one restorable root. */
-export function trashCollection(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {
-  return db.transaction(
-    (tx) => {
-      requireActiveCollection(tx, id);
+export function trashCollection(db: AppDatabase, id: string, actorId: string): Promise<{ id: string; deletedAt: string }> {
+  return db.transaction(async (tx) => {
+      await requireActiveCollection(tx, id);
       const timestamp = nowIso();
-      tx.update(items)
+      await tx.update(items)
         .set({ deletedAt: timestamp, trashRootId: id, updatedAt: timestamp, updatedBy: actorId })
         .where(and(eq(items.collectionId, id), isNull(items.deletedAt)))
-        .run();
-      tx.update(collections).set({ deletedAt: timestamp, updatedAt: timestamp, updatedBy: actorId }).where(eq(collections.id, id)).run();
+        ;
+      await tx.update(collections).set({ deletedAt: timestamp, updatedAt: timestamp, updatedBy: actorId }).where(eq(collections.id, id));
       return { id, deletedAt: timestamp };
-    },
-    { behavior: "immediate" },
-  );
+    });
 }

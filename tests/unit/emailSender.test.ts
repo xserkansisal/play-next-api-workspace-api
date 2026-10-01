@@ -28,6 +28,7 @@ describe("choosing an email sender", () => {
     const env = loadEnv({
       NODE_ENV: "production",
       AUTH_CODE_PEPPER: "a-production-pepper-that-is-long-enough-to-pass",
+      MYSQL_PASSWORD: "test-password",
       ...smtp,
     });
     expect(defaultEmailCodeSender(env)).toBeInstanceOf(SmtpEmailCodeSender);

@@ -1,238 +1,237 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
-  integer,
+  int,
+  mediumtext,
+  mysqlEnum,
+  mysqlTable,
   primaryKey,
-  sqliteTable,
-  text,
   uniqueIndex,
-  type AnySQLiteColumn,
-} from "drizzle-orm/sqlite-core";
+  varchar,
+  text,
+} from "drizzle-orm/mysql-core";
 
-// Timestamps are ISO-8601 UTC strings. `name_key` holds a case-folded name used for
-// case-insensitive uniqueness. `trash_root_id` identifies the Trash root a soft-deleted
-// row was moved with, so a whole subtree can be restored together.
+// Keep text comparisons byte-exact by creating the database with utf8mb4_0900_bin.
+// Timestamps remain ISO-8601 UTC strings so the API's ordering/comparison semantics do not change.
 
-export const users = sqliteTable("users", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  createdAt: text("created_at").notNull(),
+const id = (name: string) => varchar(name, { length: 36 });
+const timestamp = (name: string) => varchar(name, { length: 24 });
+const description = (name: string) => text(name).notNull().default(sql`('')`);
+
+export const users = mysqlTable("users", {
+  id: id("id").primaryKey(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  createdAt: timestamp("created_at").notNull(),
 });
 
-export const authCodes = sqliteTable(
+export const authCodes = mysqlTable(
   "auth_codes",
   {
-    id: text("id").primaryKey(),
-    email: text("email").notNull(),
-    codeHash: text("code_hash").notNull(),
-    createdAt: text("created_at").notNull(),
-    expiresAt: text("expires_at").notNull(),
-    attempts: integer("attempts").notNull().default(0),
-    consumedAt: text("consumed_at"),
+    id: id("id").primaryKey(),
+    email: varchar("email", { length: 320 }).notNull(),
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    attempts: int("attempts").notNull().default(0),
+    consumedAt: timestamp("consumed_at"),
   },
   (t) => [index("auth_codes_email_created_idx").on(t.email, t.createdAt)],
 );
 
-export const authSessions = sqliteTable(
+export const authSessions = mysqlTable(
   "auth_sessions",
   {
-    id: text("id").primaryKey(),
-    userId: text("user_id").notNull().references(() => users.id),
-    tokenHash: text("token_hash").notNull().unique(),
-    createdAt: text("created_at").notNull(),
-    expiresAt: text("expires_at").notNull(),
-    revokedAt: text("revoked_at"),
+    id: id("id").primaryKey(),
+    userId: id("user_id").notNull().references(() => users.id),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
   },
   (t) => [index("auth_sessions_user_idx").on(t.userId), index("auth_sessions_expiry_idx").on(t.expiresAt)],
 );
 
-export const authRateLimits = sqliteTable(
+export const authRateLimits = mysqlTable(
   "auth_rate_limits",
   {
-    email: text("email").notNull(),
-    purpose: text("purpose", { enum: ["request_code", "verify_code"] }).notNull(),
-    windowStartedAt: text("window_started_at").notNull(),
-    attempts: integer("attempts").notNull(),
+    email: varchar("email", { length: 320 }).notNull(),
+    purpose: mysqlEnum("purpose", ["request_code", "verify_code"]).notNull(),
+    windowStartedAt: timestamp("window_started_at").notNull(),
+    attempts: int("attempts").notNull(),
   },
   (t) => [primaryKey({ name: "auth_rate_limits_pk", columns: [t.email, t.purpose] })],
 );
 
-export const collections = sqliteTable(
+export const collections = mysqlTable(
   "collections",
   {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    nameKey: text("name_key").notNull(),
-    description: text("description").notNull().default(""),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-    deletedAt: text("deleted_at"),
-    createdBy: text("created_by").references(() => users.id),
-    updatedBy: text("updated_by").references(() => users.id),
+    id: id("id").primaryKey(),
+    name: varchar("name", { length: 200 }).notNull(),
+    nameKey: varchar("name_key", { length: 400 }).notNull(),
+    activeNameKey: varchar("active_name_key", { length: 400 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("deleted_at")} IS NULL THEN ${sql.identifier("name_key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    description: description("description"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    createdBy: id("created_by").references(() => users.id),
+    updatedBy: id("updated_by").references(() => users.id),
   },
-  (t) => [
-    uniqueIndex("collections_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
-  ],
+  (t) => [uniqueIndex("collections_active_name_unique").on(t.activeNameKey)],
 );
 
-export const items = sqliteTable(
+export const items = mysqlTable(
   "items",
   {
-    id: text("id").primaryKey(),
-    collectionId: text("collection_id")
+    id: id("id").primaryKey(),
+    collectionId: id("collection_id")
       .notNull()
       .references(() => collections.id),
-    parentId: text("parent_id"),
-    // Non-null sibling-group key so root-level folders participate in the unique index.
-    parentKey: text("parent_key")
-      .notNull()
-      .generatedAlwaysAs(sql`coalesce("parent_id", '')`, { mode: "virtual" }),
-    kind: text("kind", { enum: ["folder", "request"] }).notNull(),
-    name: text("name").notNull(),
-    nameKey: text("name_key").notNull(),
-    description: text("description").notNull().default(""),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-    deletedAt: text("deleted_at"),
-    trashRootId: text("trash_root_id"),
-    createdBy: text("created_by").references(() => users.id),
-    updatedBy: text("updated_by").references(() => users.id),
+    parentId: id("parent_id"),
+    parentKey: varchar("parent_key", { length: 36 }).generatedAlwaysAs(
+      sql`coalesce(${sql.identifier("parent_id")}, '')`,
+      { mode: "virtual" },
+    ),
+    kind: mysqlEnum("kind", ["folder", "request"]).notNull(),
+    name: varchar("name", { length: 200 }).notNull(),
+    nameKey: varchar("name_key", { length: 400 }).notNull(),
+    activeFolderNameKey: varchar("active_folder_name_key", { length: 400 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("kind")} = 'folder' AND ${sql.identifier("deleted_at")} IS NULL THEN ${sql.identifier("name_key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    description: description("description"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    trashRootId: id("trash_root_id"),
+    createdBy: id("created_by").references(() => users.id),
+    updatedBy: id("updated_by").references(() => users.id),
   },
   (t) => [
-    check("items_kind_check", sql`"kind" IN ('folder', 'request')`),
-    check("items_trash_state_check", sql`("deleted_at" IS NULL) = ("trash_root_id" IS NULL)`),
+    check("items_trash_state_check", sql`(${t.deletedAt} IS NULL) = (${t.trashRootId} IS NULL)`),
     uniqueIndex("items_id_collection_unique").on(t.id, t.collectionId),
-    // A parent must be an item of the same collection.
     foreignKey({
       name: "items_parent_same_collection_fk",
       columns: [t.parentId, t.collectionId],
-      foreignColumns: [t.id, t.collectionId] as [AnySQLiteColumn, AnySQLiteColumn],
+      foreignColumns: [t.id, t.collectionId],
     }),
     index("items_collection_parent_idx").on(t.collectionId, t.parentId),
     index("items_trash_root_idx").on(t.trashRootId),
-    uniqueIndex("items_active_sibling_folder_name_unique")
-      .on(t.collectionId, t.parentKey, t.nameKey)
-      .where(sql`"kind" = 'folder' AND "deleted_at" IS NULL`),
+    uniqueIndex("items_active_sibling_folder_name_unique").on(t.collectionId, t.parentKey, t.activeFolderNameKey),
   ],
 );
 
-export const requestDetails = sqliteTable(
+export const requestDetails = mysqlTable(
   "request_details",
   {
-    itemId: text("item_id")
+    itemId: id("item_id")
       .primaryKey()
       .references(() => items.id),
-    method: text("method", { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] }).notNull(),
-    url: text("url").notNull(),
-    bodyType: text("body_type", { enum: ["json"] }),
-    bodyContent: text("body_content"),
-    authType: text("auth_type", { enum: ["none"] })
-      .notNull()
-      .default("none"),
+    method: mysqlEnum("method", ["GET", "POST", "PUT", "PATCH", "DELETE"]).notNull(),
+    url: varchar("url", { length: 8192 }).notNull(),
+    bodyType: mysqlEnum("body_type", ["json"]),
+    bodyContent: mediumtext("body_content"),
+    authType: mysqlEnum("auth_type", ["none"]).notNull().default("none"),
   },
-  () => [
-    check("request_details_method_check", sql`"method" IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')`),
-    check("request_details_auth_check", sql`"auth_type" = 'none'`),
+  (t) => [
     check(
       "request_details_body_check",
-      sql`("body_type" IS NULL AND "body_content" IS NULL) OR ("body_type" = 'json' AND "body_content" IS NOT NULL)`,
+      sql`(${t.bodyType} IS NULL AND ${t.bodyContent} IS NULL) OR (${t.bodyType} = 'json' AND ${t.bodyContent} IS NOT NULL)`,
     ),
   ],
 );
 
 function keyValueRowColumns() {
   return {
-    requestId: text("request_id")
+    requestId: id("request_id")
       .notNull()
       .references(() => requestDetails.itemId),
-    position: integer("position").notNull(),
+    position: int("position").notNull(),
     key: text("key").notNull(),
     value: text("value").notNull(),
-    description: text("description").notNull().default(""),
-    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    description: description("description"),
+    enabled: boolean("enabled").notNull().default(true),
   };
 }
 
-export const requestQueryParams = sqliteTable("request_query_params", keyValueRowColumns(), (t) => [
+export const requestQueryParams = mysqlTable("request_query_params", keyValueRowColumns(), (t) => [
   primaryKey({ name: "request_query_params_pk", columns: [t.requestId, t.position] }),
-  check("request_query_params_position_check", sql`"position" >= 0`),
+  check("request_query_params_position_check", sql`${t.position} >= 0`),
 ]);
 
-export const requestHeaders = sqliteTable("request_headers", keyValueRowColumns(), (t) => [
+export const requestHeaders = mysqlTable("request_headers", keyValueRowColumns(), (t) => [
   primaryKey({ name: "request_headers_pk", columns: [t.requestId, t.position] }),
-  check("request_headers_position_check", sql`"position" >= 0`),
+  check("request_headers_position_check", sql`${t.position} >= 0`),
 ]);
 
-export const environments = sqliteTable(
+export const environments = mysqlTable(
   "environments",
   {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    nameKey: text("name_key").notNull(),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-    deletedAt: text("deleted_at"),
-    createdBy: text("created_by").references(() => users.id),
-    updatedBy: text("updated_by").references(() => users.id),
+    id: id("id").primaryKey(),
+    name: varchar("name", { length: 200 }).notNull(),
+    nameKey: varchar("name_key", { length: 400 }).notNull(),
+    activeNameKey: varchar("active_name_key", { length: 400 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("deleted_at")} IS NULL THEN ${sql.identifier("name_key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    createdBy: id("created_by").references(() => users.id),
+    updatedBy: id("updated_by").references(() => users.id),
   },
-  (t) => [
-    uniqueIndex("environments_active_name_unique").on(t.nameKey).where(sql`"deleted_at" IS NULL`),
-  ],
+  (t) => [uniqueIndex("environments_active_name_unique").on(t.activeNameKey)],
 );
 
-export const environmentVariables = sqliteTable(
+export const environmentVariables = mysqlTable(
   "environment_variables",
   {
-    environmentId: text("environment_id")
+    environmentId: id("environment_id")
       .notNull()
       .references(() => environments.id),
-    position: integer("position").notNull(),
-    key: text("key").notNull(),
-    value: text("value").notNull(),
-    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    position: int("position").notNull(),
+    key: varchar("key", { length: 200 }).notNull(),
+    value: varchar("value", { length: 8192 }).notNull(),
+    enabled: boolean("enabled").notNull().default(true),
   },
   (t) => [
     primaryKey({ name: "environment_variables_pk", columns: [t.environmentId, t.position] }),
     uniqueIndex("environment_variables_key_unique").on(t.environmentId, t.key),
-    check("environment_variables_position_check", sql`"position" >= 0`),
+    check("environment_variables_position_check", sql`${t.position} >= 0`),
   ],
 );
 
-/**
- * Variables captured out of a response and reused in later requests, held at one of two scopes.
- *
- * `user` rows belong to one person and no one else can read or write them; `global` rows are
- * shared by everyone. They are deliberately separate from `environment_variables`: an environment
- * is a shared, exportable document, and writing a value captured from one person's session into it
- * would silently change what every teammate sends.
- *
- * A nullable `user_id` carries the distinction rather than two tables, so one query and one route
- * serve both. The check constraint is what stops the two halves drifting apart - a `user` row with
- * no owner would be readable by everybody, which is the exact opposite of what the scope means.
- */
-export const variables = sqliteTable(
+export const variables = mysqlTable(
   "variables",
   {
-    id: text("id").primaryKey(),
-    scope: text("scope").notNull(),
-    userId: text("user_id").references(() => users.id),
-    key: text("key").notNull(),
-    value: text("value").notNull(),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-    updatedBy: text("updated_by").references(() => users.id),
+    id: id("id").primaryKey(),
+    scope: mysqlEnum("scope", ["user", "global"]).notNull(),
+    userId: id("user_id").references(() => users.id),
+    key: varchar("key", { length: 200 }).notNull(),
+    userScopedKey: varchar("user_scoped_key", { length: 200 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("scope")} = 'user' THEN ${sql.identifier("key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    globalScopedKey: varchar("global_scoped_key", { length: 200 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("scope")} = 'global' THEN ${sql.identifier("key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    value: mediumtext("value").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    updatedBy: id("updated_by").references(() => users.id),
   },
   (t) => [
-    check("variables_scope_check", sql`"scope" IN ('user', 'global')`),
     check(
       "variables_owner_check",
-      sql`("scope" = 'user' AND "user_id" IS NOT NULL) OR ("scope" = 'global' AND "user_id" IS NULL)`,
+      sql`(${t.scope} = 'user' AND ${t.userId} IS NOT NULL) OR (${t.scope} = 'global' AND ${t.userId} IS NULL)`,
     ),
-    // Partial, so one person's "token" never collides with anybody else's, and the single global
-    // "token" stays single.
-    uniqueIndex("variables_user_key_unique").on(t.userId, t.key).where(sql`"scope" = 'user'`),
-    uniqueIndex("variables_global_key_unique").on(t.key).where(sql`"scope" = 'global'`),
+    uniqueIndex("variables_user_key_unique").on(t.userId, t.userScopedKey),
+    uniqueIndex("variables_global_key_unique").on(t.globalScopedKey),
   ],
 );

@@ -177,13 +177,13 @@ describe("GET /api/v1/events", () => {
     await ctx.api.post(`/api/v1/trash/${missing}/restore`).expect(404);
 
     // Database failures inside the transaction roll back and publish nothing.
-    ctx.db.$client.exec("CREATE TRIGGER fail_headers BEFORE INSERT ON request_headers BEGIN SELECT RAISE(ABORT, 'injected'); END;");
+    await ctx.db.$client.query("CREATE TRIGGER fail_headers BEFORE INSERT ON request_headers FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'");
     await ctx.api.put(`${items}/${req.id}`).send({ type: "request", name: "R2", ...requestFields, headers: [{ key: "a", value: "b" }] }).expect(500);
-    ctx.db.$client.exec("CREATE TRIGGER fail_env BEFORE UPDATE ON environments BEGIN SELECT RAISE(ABORT, 'injected'); END;");
+    await ctx.db.$client.query("CREATE TRIGGER fail_env BEFORE UPDATE ON environments FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'");
     await ctx.api.delete(`/api/v1/environments/${env.id}`).expect(500);
-    ctx.db.$client.exec("CREATE TRIGGER fail_col BEFORE UPDATE ON collections BEGIN SELECT RAISE(ABORT, 'injected'); END;");
+    await ctx.db.$client.query("CREATE TRIGGER fail_col BEFORE UPDATE ON collections FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'");
     await ctx.api.delete(`/api/v1/collections/${col.id}`).expect(500);
-    ctx.db.$client.exec("DROP TRIGGER fail_col");
+    await ctx.db.$client.query("DROP TRIGGER fail_col");
 
     // A later successful write must be the first event received.
     await ctx.api.put(`/api/v1/collections/${col.id}`).send({ name: "Renamed" }).expect(200);

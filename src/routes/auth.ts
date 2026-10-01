@@ -77,7 +77,7 @@ export function createAuthRouter(
   router.post("/request-code", async (req, res, next) => {
     try {
       const { email: rawEmail } = emailInputSchema.parse(req.body);
-      const issued = requestCode(db, authConfig, rawEmail);
+      const issued = await requestCode(db, authConfig, rawEmail);
       try {
         await sender.sendCode({ to: issued.email, code: issued.code, expiresAt: issued.expiresAt });
       } catch (err) {
@@ -86,7 +86,7 @@ export function createAuthRouter(
         // otherwise a 503 with no explanation anywhere, and the reason is a property of this
         // server's configuration, not of the address that was asked for.
         logger(new Error(`Failed to deliver a sign-in code via SMTP: ${err instanceof Error ? err.message : String(err)}`));
-        invalidateCode(db, issued.challengeId);
+        await invalidateCode(db, issued.challengeId);
         res.status(503).json({ error: { code: "AUTH_DELIVERY_FAILED", message: "Unable to send sign-in code" } });
         return;
       }
@@ -96,10 +96,10 @@ export function createAuthRouter(
     }
   });
 
-  router.post("/verify-code", (req, res, next) => {
+  router.post("/verify-code", async (req, res, next) => {
     try {
       const { email, code } = verifyCodeInputSchema.parse(req.body);
-      const outcome = verifyCode(db, authConfig, email, code);
+      const outcome = await verifyCode(db, authConfig, email, code);
       if (!outcome.ok) {
         if (outcome.rateLimited) {
           res.status(429).json({ error: { code: "AUTH_RATE_LIMITED", message: "Please wait before trying again" } });
@@ -122,9 +122,9 @@ export function createAuthRouter(
     res.json({ user: req.authUser });
   });
 
-  router.post("/sign-out", (req, res) => {
+  router.post("/sign-out", async (req, res) => {
     const token = readCookie(req, env.AUTH_COOKIE_NAME);
-    if (token) revokeSession(db, token);
+    if (token) await revokeSession(db, token);
     res.setHeader("Set-Cookie", appendCookie(env.AUTH_COOKIE_NAME, "", cookieOptions(env, 0)) + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
     res.status(204).end();
   });

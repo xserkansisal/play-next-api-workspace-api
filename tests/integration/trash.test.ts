@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestContext, requestFields, type TestContext } from "../helpers.js";
+import { createTestContext, queryRows, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
 beforeEach(async () => {
@@ -15,13 +15,13 @@ async function createItem(collectionId: string, body: Record<string, unknown>) {
   return (await ctx.api.post(`/api/v1/collections/${collectionId}/items`).send(body).expect(201)).body;
 }
 
-function tableSnapshot() {
-  const client = ctx.db.$client;
-  return {
-    collections: client.prepare("SELECT * FROM collections ORDER BY id").all(),
-    items: client.prepare("SELECT * FROM items ORDER BY id").all(),
-    environments: client.prepare("SELECT * FROM environments ORDER BY id").all(),
-  };
+async function tableSnapshot() {
+  const [collections, items, environments] = await Promise.all([
+    queryRows(ctx.db, "SELECT * FROM collections ORDER BY id"),
+    queryRows(ctx.db, "SELECT * FROM items ORDER BY id"),
+    queryRows(ctx.db, "SELECT * FROM environments ORDER BY id"),
+  ]);
+  return { collections, items, environments };
 }
 
 describe("Trash API", () => {
@@ -82,19 +82,19 @@ describe("Trash API", () => {
     await ctx.api.delete(`/api/v1/collections/${col.id}/items/${folder.id}`).expect(204);
     const replacement = await createItem(col.id, { type: "folder", name: "SHARED" });
 
-    const snapshot = tableSnapshot();
+    const snapshot = await tableSnapshot();
     const check = await ctx.api.post(`/api/v1/trash/${folder.id}/restore/check`).expect(200);
     expect(check.body).toMatchObject({
       kind: "folder",
       canRestore: false,
       conflicts: [{ id: folder.id, kind: "folder", name: "Shared", parentId: null, conflictingId: replacement.id }],
     });
-    expect(tableSnapshot()).toEqual(snapshot);
+    expect(await tableSnapshot()).toEqual(snapshot);
 
     const rejected = await ctx.api.post(`/api/v1/trash/${folder.id}/restore`).send({}).expect(409);
     expect(rejected.body.error.code).toBe("RESTORE_CONFLICT");
     expect(rejected.body.error.details.conflicts).toHaveLength(1);
-    expect(tableSnapshot()).toEqual(snapshot);
+    expect(await tableSnapshot()).toEqual(snapshot);
 
     // Checking with a still-conflicting override reports it, without writing.
     const stillBad = await ctx.api
@@ -169,10 +169,10 @@ describe("Trash API", () => {
       canRestore: false,
       conflicts: [{ id: env.id, kind: "environment", name: "Dev", conflictingId: active.id }],
     });
-    const snapshot = tableSnapshot();
+    const snapshot = await tableSnapshot();
     const rejected = await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(409);
     expect(rejected.body.error.code).toBe("RESTORE_CONFLICT");
-    expect(tableSnapshot()).toEqual(snapshot);
+    expect(await tableSnapshot()).toEqual(snapshot);
 
     await ctx.api.post(`/api/v1/trash/${env.id}/restore`).send({ collectionName: "X" }).expect(400);
     const restored = await ctx.api

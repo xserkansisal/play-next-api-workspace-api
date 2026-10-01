@@ -1,50 +1,50 @@
 {
-  "version": "6",
-  "dialect": "sqlite",
-  "id": "fdc3d5fb-fd45-4bed-a58b-196ea8fda96b",
-  "prevId": "c30855cb-1f23-422e-a039-2acdc1ceaafe",
+  "version": "5",
+  "dialect": "mysql",
+  "id": "a4b7f6e1-e39e-415c-bd13-d3f2ac54c79a",
+  "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "auth_codes": {
       "name": "auth_codes",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "email": {
           "name": "email",
-          "type": "text",
+          "type": "varchar(320)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "code_hash": {
           "name": "code_hash",
-          "type": "text",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "attempts": {
           "name": "attempts",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -52,7 +52,7 @@
         },
         "consumed_at": {
           "name": "consumed_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -69,37 +69,44 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "auth_codes_id": {
+          "name": "auth_codes_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraint": {}
     },
     "auth_rate_limits": {
       "name": "auth_rate_limits",
       "columns": {
         "email": {
           "name": "email",
-          "type": "text",
+          "type": "varchar(320)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "purpose": {
           "name": "purpose",
-          "type": "text",
+          "type": "enum('request_code','verify_code')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "window_started_at": {
           "name": "window_started_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "attempts": {
           "name": "attempts",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -109,70 +116,63 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "auth_rate_limits_pk": {
+          "name": "auth_rate_limits_pk",
           "columns": [
             "email",
             "purpose"
-          ],
-          "name": "auth_rate_limits_pk"
+          ]
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraint": {}
     },
     "auth_sessions": {
       "name": "auth_sessions",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "user_id": {
           "name": "user_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "token_hash": {
           "name": "token_hash",
-          "type": "text",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "revoked_at": {
           "name": "revoked_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         }
       },
       "indexes": {
-        "auth_sessions_token_hash_unique": {
-          "name": "auth_sessions_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ],
-          "isUnique": true
-        },
         "auth_sessions_user_idx": {
           "name": "auth_sessions_user_idx",
           "columns": [
@@ -203,33 +203,58 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
+      "compositePrimaryKeys": {
+        "auth_sessions_id": {
+          "name": "auth_sessions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "auth_sessions_token_hash_unique": {
+          "name": "auth_sessions_token_hash_unique",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      },
+      "checkConstraint": {}
     },
     "collections": {
       "name": "collections",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name_key": {
           "name": "name_key",
-          "type": "text",
+          "type": "varchar(400)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "active_name_key": {
+          "name": "active_name_key",
+          "type": "varchar(400)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE WHEN `deleted_at` IS NULL THEN `name_key` ELSE NULL END",
+            "type": "virtual"
+          }
         },
         "description": {
           "name": "description",
@@ -237,39 +262,39 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "''"
+          "default": "('')"
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "deleted_at": {
           "name": "deleted_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "created_by": {
           "name": "created_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "updated_by": {
           "name": "updated_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -279,10 +304,9 @@
         "collections_active_name_unique": {
           "name": "collections_active_name_unique",
           "columns": [
-            "name_key"
+            "active_name_key"
           ],
-          "isUnique": true,
-          "where": "\"deleted_at\" IS NULL"
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -313,44 +337,51 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "collections_id": {
+          "name": "collections_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraint": {}
     },
     "environment_variables": {
       "name": "environment_variables",
       "columns": {
         "environment_id": {
           "name": "environment_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "position": {
           "name": "position",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "key": {
           "name": "key",
-          "type": "text",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "value": {
           "name": "value",
-          "type": "text",
+          "type": "varchar(8192)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "enabled": {
           "name": "enabled",
-          "type": "integer",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -384,18 +415,18 @@
       },
       "compositePrimaryKeys": {
         "environment_variables_pk": {
+          "name": "environment_variables_pk",
           "columns": [
             "environment_id",
             "position"
-          ],
-          "name": "environment_variables_pk"
+          ]
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {
+      "checkConstraint": {
         "environment_variables_position_check": {
           "name": "environment_variables_position_check",
-          "value": "\"position\" >= 0"
+          "value": "`environment_variables`.`position` >= 0"
         }
       }
     },
@@ -404,56 +435,67 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name_key": {
           "name": "name_key",
-          "type": "text",
+          "type": "varchar(400)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
+        "active_name_key": {
+          "name": "active_name_key",
+          "type": "varchar(400)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE WHEN `deleted_at` IS NULL THEN `name_key` ELSE NULL END",
+            "type": "virtual"
+          }
+        },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "deleted_at": {
           "name": "deleted_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "created_by": {
           "name": "created_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "updated_by": {
           "name": "updated_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -463,10 +505,9 @@
         "environments_active_name_unique": {
           "name": "environments_active_name_unique",
           "columns": [
-            "name_key"
+            "active_name_key"
           ],
-          "isUnique": true,
-          "where": "\"deleted_at\" IS NULL"
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -497,65 +538,83 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "environments_id": {
+          "name": "environments_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraint": {}
     },
     "items": {
       "name": "items",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "collection_id": {
           "name": "collection_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "parent_id": {
           "name": "parent_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "parent_key": {
           "name": "parent_key",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false,
           "generated": {
-            "as": "(coalesce(\"parent_id\", ''))",
+            "as": "coalesce(`parent_id`, '')",
             "type": "virtual"
           }
         },
         "kind": {
           "name": "kind",
-          "type": "text",
+          "type": "enum('folder','request')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "name_key": {
           "name": "name_key",
-          "type": "text",
+          "type": "varchar(400)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "active_folder_name_key": {
+          "name": "active_folder_name_key",
+          "type": "varchar(400)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE WHEN `kind` = 'folder' AND `deleted_at` IS NULL THEN `name_key` ELSE NULL END",
+            "type": "virtual"
+          }
         },
         "description": {
           "name": "description",
@@ -563,46 +622,46 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "''"
+          "default": "('')"
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "deleted_at": {
           "name": "deleted_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "trash_root_id": {
           "name": "trash_root_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "created_by": {
           "name": "created_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "updated_by": {
           "name": "updated_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -637,10 +696,9 @@
           "columns": [
             "collection_id",
             "parent_key",
-            "name_key"
+            "active_folder_name_key"
           ],
-          "isUnique": true,
-          "where": "\"kind\" = 'folder' AND \"deleted_at\" IS NULL"
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -699,16 +757,19 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "items_id": {
+          "name": "items_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "items_kind_check": {
-          "name": "items_kind_check",
-          "value": "\"kind\" IN ('folder', 'request')"
-        },
+      "checkConstraint": {
         "items_trash_state_check": {
           "name": "items_trash_state_check",
-          "value": "(\"deleted_at\" IS NULL) = (\"trash_root_id\" IS NULL)"
+          "value": "(`items`.`deleted_at` IS NULL) = (`items`.`trash_root_id` IS NULL)"
         }
       }
     },
@@ -717,42 +778,42 @@
       "columns": {
         "item_id": {
           "name": "item_id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "method": {
           "name": "method",
-          "type": "text",
+          "type": "enum('GET','POST','PUT','PATCH','DELETE')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "url": {
           "name": "url",
-          "type": "text",
+          "type": "varchar(8192)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "body_type": {
           "name": "body_type",
-          "type": "text",
+          "type": "enum('json')",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "body_content": {
           "name": "body_content",
-          "type": "text",
+          "type": "mediumtext",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "auth_type": {
           "name": "auth_type",
-          "type": "text",
+          "type": "enum('none')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -775,20 +836,19 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "request_details_item_id": {
+          "name": "request_details_item_id",
+          "columns": [
+            "item_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "request_details_method_check": {
-          "name": "request_details_method_check",
-          "value": "\"method\" IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')"
-        },
-        "request_details_auth_check": {
-          "name": "request_details_auth_check",
-          "value": "\"auth_type\" = 'none'"
-        },
+      "checkConstraint": {
         "request_details_body_check": {
           "name": "request_details_body_check",
-          "value": "(\"body_type\" IS NULL AND \"body_content\" IS NULL) OR (\"body_type\" = 'json' AND \"body_content\" IS NOT NULL)"
+          "value": "(`request_details`.`body_type` IS NULL AND `request_details`.`body_content` IS NULL) OR (`request_details`.`body_type` = 'json' AND `request_details`.`body_content` IS NOT NULL)"
         }
       }
     },
@@ -797,14 +857,14 @@
       "columns": {
         "request_id": {
           "name": "request_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "position": {
           "name": "position",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -829,11 +889,11 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "''"
+          "default": "('')"
         },
         "enabled": {
           "name": "enabled",
-          "type": "integer",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -858,18 +918,18 @@
       },
       "compositePrimaryKeys": {
         "request_headers_pk": {
+          "name": "request_headers_pk",
           "columns": [
             "request_id",
             "position"
-          ],
-          "name": "request_headers_pk"
+          ]
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {
+      "checkConstraint": {
         "request_headers_position_check": {
           "name": "request_headers_position_check",
-          "value": "\"position\" >= 0"
+          "value": "`request_headers`.`position` >= 0"
         }
       }
     },
@@ -878,14 +938,14 @@
       "columns": {
         "request_id": {
           "name": "request_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "position": {
           "name": "position",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -910,11 +970,11 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "''"
+          "default": "('')"
         },
         "enabled": {
           "name": "enabled",
-          "type": "integer",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
@@ -939,18 +999,18 @@
       },
       "compositePrimaryKeys": {
         "request_query_params_pk": {
+          "name": "request_query_params_pk",
           "columns": [
             "request_id",
             "position"
-          ],
-          "name": "request_query_params_pk"
+          ]
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {
+      "checkConstraint": {
         "request_query_params_position_check": {
           "name": "request_query_params_position_check",
-          "value": "\"position\" >= 0"
+          "value": "`request_query_params`.`position` >= 0"
         }
       }
     },
@@ -959,95 +1019,123 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "email": {
           "name": "email",
-          "type": "text",
+          "type": "varchar(320)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         }
       },
-      "indexes": {
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "users_id": {
+          "name": "users_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
         "users_email_unique": {
           "name": "users_email_unique",
           "columns": [
             "email"
-          ],
-          "isUnique": true
+          ]
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraint": {}
     },
     "variables": {
       "name": "variables",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
-          "primaryKey": true,
+          "type": "varchar(36)",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "scope": {
           "name": "scope",
-          "type": "text",
+          "type": "enum('user','global')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "user_id": {
           "name": "user_id",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "key": {
           "name": "key",
-          "type": "text",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
+        "user_scoped_key": {
+          "name": "user_scoped_key",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE WHEN `scope` = 'user' THEN `key` ELSE NULL END",
+            "type": "virtual"
+          }
+        },
+        "global_scoped_key": {
+          "name": "global_scoped_key",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "CASE WHEN `scope` = 'global' THEN `key` ELSE NULL END",
+            "type": "virtual"
+          }
+        },
         "value": {
           "name": "value",
-          "type": "text",
+          "type": "mediumtext",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "updated_by": {
           "name": "updated_by",
-          "type": "text",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1058,18 +1146,16 @@
           "name": "variables_user_key_unique",
           "columns": [
             "user_id",
-            "key"
+            "user_scoped_key"
           ],
-          "isUnique": true,
-          "where": "\"scope\" = 'user'"
+          "isUnique": true
         },
         "variables_global_key_unique": {
           "name": "variables_global_key_unique",
           "columns": [
-            "key"
+            "global_scoped_key"
           ],
-          "isUnique": true,
-          "where": "\"scope\" = 'global'"
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -1100,28 +1186,31 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "variables_id": {
+          "name": "variables_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "variables_scope_check": {
-          "name": "variables_scope_check",
-          "value": "\"scope\" IN ('user', 'global')"
-        },
+      "checkConstraint": {
         "variables_owner_check": {
           "name": "variables_owner_check",
-          "value": "(\"scope\" = 'user' AND \"user_id\" IS NOT NULL) OR (\"scope\" = 'global' AND \"user_id\" IS NULL)"
+          "value": "(`variables`.`scope` = 'user' AND `variables`.`user_id` IS NOT NULL) OR (`variables`.`scope` = 'global' AND `variables`.`user_id` IS NULL)"
         }
       }
     }
   },
   "views": {},
-  "enums": {},
   "_meta": {
     "schemas": {},
     "tables": {},
     "columns": {}
   },
   "internal": {
+    "tables": {},
     "indexes": {}
   }
 }

@@ -22,14 +22,10 @@ credentials in transit. Keep the services internal-only and revisit TLS plus
 Requirements:
 
 - Node.js **22.12 or later** and npm.
+- MySQL **8.0.16 or later** with a database created using `utf8mb4_0900_bin` collation.
 - PM2 installed for the deployment account (`npm install --global pm2`).
-- A persistent writable data directory outside the application checkout, with enough space for
-  the SQLite database and backups. Keep it across releases/redeploys; do not put `DATABASE_PATH`
-  under the deployment directory.
-
-The repository's `engines` field allows Node >=22.12. `better-sqlite3` is pinned to 12.11.1:
-version 13.0.3 segfaulted on the development machine's Node 23.5 runtime. The package override
-for drizzle-kit's nested esbuild dependency is also intentional.
+- A MySQL account limited to the application's database, with permission to create/alter tables
+  for migrations. The application no longer uses SQLite or native SQLite modules.
 
 The API accepts JSON request bodies up to 50 MiB (50 × 1024 × 1024 bytes), including atomic
 nested collection imports. This limit must be matched by any reverse proxy in front of the API.
@@ -46,14 +42,18 @@ npm run build
 mkdir -p "$HOME/.pm2/logs"
 ```
 
-Choose a persistent path appropriate for the VM and deployment account (for example a dedicated
-directory under `/var/lib`, owned by that account). Do not blindly use that example path; the VM
-and filesystem layout are not prescribed here. Create the directory before migration/startup.
+Provision MySQL separately and create the database before migration/startup:
+
+```sql
+CREATE DATABASE play_next_api CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;
+CREATE USER 'play_next_api'@'127.0.0.1' IDENTIFIED BY 'replace-with-a-random-password';
+GRANT ALL PRIVILEGES ON play_next_api.* TO 'play_next_api'@'127.0.0.1';
+```
 
 ## Configure environment and migrate
 
 Export the production settings in the shell or service-management environment used to invoke
-PM2. The ecosystem file requires `PORT`, `DATABASE_PATH`, and `AUTH_CODE_PEPPER`; production
+PM2. The ecosystem file requires `PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, and `AUTH_CODE_PEPPER`; production
 environment validation also requires `SMTP_HOST` and `SMTP_FROM`. It defaults `HOST` to
 `127.0.0.1`, `SSE_HEARTBEAT_MS` to `15000`, `SSE_RETRY_MS` to `3000`, the code lifetime to
 900 seconds, the code-attempt limit to 5, request/verify rate limits to 3/10 per 900 seconds,
@@ -64,7 +64,11 @@ direct browser access or Vite development; credentialed CORS is restricted to th
 export NODE_ENV=production
 export HOST=127.0.0.1                  # nginx connects locally; keep the API port off the network
 export PORT=3000                       # choose an unused local port
-export DATABASE_PATH=/persistent/path/api.sqlite  # choose a persistent path outside this checkout
+export MYSQL_HOST=127.0.0.1
+export MYSQL_PORT=3306
+export MYSQL_USER=play_next_api
+export MYSQL_PASSWORD=              # use a unique password; do not leave empty in production
+export MYSQL_DATABASE=play_next_api
 # Optional only for direct browser access or Vite development:
 # export CORS_ORIGIN=http://localhost:5173
 export SSE_HEARTBEAT_MS=15000
@@ -214,20 +218,6 @@ code. `tests/integration/auth.test.ts` locks this behaviour in.
 Note that with no TLS in front of the API, the code itself still travels in plain text over the
 internal network. The pepper protects a stolen database, not the wire.
 
-Before upgrading a populated database, stop the API and take a verified backup using the
-procedure below. Run the read-only name-key preflight:
-
-```sh
-npm run db:check-name-keys
-```
-
-If it reports collisions, rename or trash all but one active name in each reported group using
-the old API version, then rerun the check until it exits successfully. The safe upgrade path and
-reason for this check are documented in the README's
-[case-folded name-key migration caveat](../README.md#migration-caveat-case-folded-name-keys).
-Migration `0001` backfills with SQLite `lower()` (ASCII-only); startup and `db:migrate`
-recompute Unicode name keys in JavaScript and refuse to write if corrected active names collide.
-
 Apply pending migrations explicitly before starting the new release:
 
 ```sh
@@ -245,13 +235,14 @@ account's home), restarts on process failure with a delay and bounded rapid-rest
 and gives graceful shutdown 15 seconds.
 
 **Do not change this app to cluster mode or increase `instances`.** Its SSE change-event hub and
-replay history are process-local, and the SQLite service assumes a single writable API process.
+replay history are process-local.
 Multiple PM2 workers would split events and violate that single-writer deployment assumption.
 
 Start and inspect the service:
 
 ```sh
-PORT="$PORT" DATABASE_PATH="$DATABASE_PATH" HOST="$HOST" \
+PORT="$PORT" MYSQL_HOST="$MYSQL_HOST" MYSQL_PORT="$MYSQL_PORT" \
+MYSQL_USER="$MYSQL_USER" MYSQL_PASSWORD="$MYSQL_PASSWORD" MYSQL_DATABASE="$MYSQL_DATABASE" HOST="$HOST" \
   SSE_HEARTBEAT_MS="$SSE_HEARTBEAT_MS" SSE_RETRY_MS="$SSE_RETRY_MS" \
   pm2 start ecosystem.config.cjs --only play-next-api
 pm2 status
@@ -263,7 +254,7 @@ browser access or using Vite, provide the exact origin in PM2's environment and 
 the PM2 process environment accordingly.
 
 PM2 sends `SIGINT` when stopping/restarting the process. The API closes the in-memory event hub
-first (ending every SSE response), then closes the HTTP server and SQLite connection. A client
+first (ending every SSE response), then closes the HTTP server and MySQL connection pool. A client
 will reconnect after restart; since the hub's epoch and 1000-event replay buffer are in memory,
 the new process reports unavailable replay history and the client should resync.
 
@@ -300,60 +291,45 @@ local, that route treats the presence of any forwarding header as proof the requ
 and refuses it. That is the one safe direction to read an untrusted header in - it can only close
 the route, never open it - and it is not a basis for trusting these headers anywhere else.
 
-## SQLite backup and restore
+## MySQL backup and restore
 
-SQLite runs in WAL mode. While the API is active, committed changes may reside in the `-wal`
-sidecar instead of the main `.sqlite` file. Copying only the main file during operation can
-silently omit committed writes and can produce an inconsistent backup; copying a live main file
-without its matching WAL/SHM files is not a valid backup procedure. Use SQLite's online backup
-instead.
-
-### Online backup while the API is running
-
-Set `DATABASE_PATH` and choose a unique backup destination on persistent storage with sufficient
-space. The destination should not be the live database path:
+Use MySQL's logical backup tooling and test restores regularly. `--single-transaction` provides a
+consistent snapshot for the InnoDB tables created by this service without stopping the API.
+Store the dump with restrictive permissions because it contains users, sessions, sign-in hashes,
+collections, and captured variables.
 
 ```sh
 set -eu
-BACKUP_PATH=/persistent/backups/api-$(date -u +%Y%m%dT%H%M%SZ).sqlite
+BACKUP_PATH=/persistent/backups/play-next-api-$(date -u +%Y%m%dT%H%M%SZ).sql
 mkdir -p "$(dirname "$BACKUP_PATH")"
-sqlite3 "$DATABASE_PATH" ".backup '$BACKUP_PATH'"
-test "$(sqlite3 "$BACKUP_PATH" 'PRAGMA integrity_check;')" = "ok"
+mysqldump --single-transaction --routines --triggers \
+  --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
+  --password="$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$BACKUP_PATH"
+test -s "$BACKUP_PATH"
+chmod 600 "$BACKUP_PATH"
 ```
 
-The SQLite shell `.backup` command uses SQLite's online backup API and produces a self-contained,
-consistent snapshot, including committed pages currently represented in the WAL. Run the
-integrity check before considering the backup usable. Protect backups with the same access
-controls as the live database, and define retention/restore testing appropriate to the
-organization.
+Restore into a new empty database with the same required character set and collation:
 
-### Restore to a fresh path
-
-1. Stop the API with `pm2 stop play-next-api` and verify it is stopped. Do not replace an open
-   database.
-2. Verify the selected backup:
+1. Create an empty target database:
 
    ```sh
-   test "$(sqlite3 "$BACKUP_PATH" 'PRAGMA integrity_check;')" = "ok"
+   RESTORE_DATABASE=play_next_api_restore
+   mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
+     --password="$MYSQL_PASSWORD" \
+     -e "CREATE DATABASE \`$RESTORE_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin"
    ```
 
-3. Restore through SQLite into a new file path. Ensure the destination does not already exist,
-   then create its parent directory:
+2. Import the dump and verify its tables and row counts:
 
    ```sh
-   RESTORE_PATH=/persistent/path/api-restored.sqlite
-   test ! -e "$RESTORE_PATH"
-   mkdir -p "$(dirname "$RESTORE_PATH")"
-   sqlite3 "$RESTORE_PATH" ".restore '$BACKUP_PATH'"
-   test "$(sqlite3 "$RESTORE_PATH" 'PRAGMA integrity_check;')" = "ok"
+   mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USER" \
+     --password="$MYSQL_PASSWORD" "$RESTORE_DATABASE" < "$BACKUP_PATH"
    ```
 
-4. Set `DATABASE_PATH` to the restored path, run `npm run db:migrate`, then start the service
-   with PM2 and verify the expected collections/environments through the API.
+3. Stop the API before switching it to the restored database. Set `MYSQL_DATABASE` to the target,
+   run `npm run db:migrate`, start the service, then verify expected collections/environments and
+   authentication through the API. Keep the original database untouched until verification passes.
 
-If copying files is unavoidable, stop the API cleanly first and preserve the database plus its
-matching `-wal`/`-shm` sidecars as one stopped snapshot. Never copy only the `.sqlite` while it
-is live. A naive copy can lose committed transactions still in the WAL; an inconsistent set of
-main/WAL/SHM files can also fail integrity checks or make recovery impossible. Keep the original
-files untouched until the restored database has passed integrity checks and application-level
-verification.
+This release intentionally does not import SQLite files. Provision a fresh MySQL database instead;
+retain any old SQLite files separately if they are needed for manual historical reference.

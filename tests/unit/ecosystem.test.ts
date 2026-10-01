@@ -23,7 +23,9 @@ function loadConfig(overrides: Record<string, string>) {
 
 const REQUIRED = {
   PORT: "3000",
-  DATABASE_PATH: "/tmp/does-not-need-to-exist.sqlite",
+  MYSQL_USER: "play_next_api",
+  MYSQL_PASSWORD: "test-password",
+  MYSQL_DATABASE: "play_next_api",
   AUTH_CODE_PEPPER: "a-pepper-long-enough-for-the-schema-00000",
 };
 
@@ -48,6 +50,11 @@ describe("PM2 ecosystem configuration", () => {
       ...REQUIRED,
       HOST: "127.0.0.1",
       NODE_ENV: "production",
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: "3306",
+      MYSQL_USER: "play_next_api",
+      MYSQL_PASSWORD: "test-password",
+      MYSQL_DATABASE: "play_next_api",
       CORS_ORIGIN: "https://workspace.example",
       SSE_HEARTBEAT_MS: "15000",
       SSE_RETRY_MS: "3000",

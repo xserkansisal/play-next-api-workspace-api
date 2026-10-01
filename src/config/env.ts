@@ -32,7 +32,11 @@ const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
-  DATABASE_PATH: z.string().min(1).default("./data/api.sqlite"),
+  MYSQL_HOST: z.string().min(1).default("127.0.0.1"),
+  MYSQL_PORT: z.coerce.number().int().min(1).max(65535).default(3306),
+  MYSQL_USER: z.string().min(1).default("play_next_api"),
+  MYSQL_PASSWORD: optionalStringEnv(z.string().min(1)),
+  MYSQL_DATABASE: z.string().regex(/^[A-Za-z0-9_]+$/).default("play_next_api"),
   // A bare "*" means every origin; anything else must be a single origin. The two are validated
   // together so a mistyped wildcard is rejected rather than silently treated as one.
   CORS_ORIGIN: z
@@ -72,6 +76,9 @@ const baseEnvSchema = z.object({
 
 const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV === "production") {
+    if (!env.MYSQL_PASSWORD) {
+      ctx.addIssue({ code: "custom", path: ["MYSQL_PASSWORD"], message: "is required in production" });
+    }
     if (PUBLISHED_PEPPERS.has(env.AUTH_CODE_PEPPER)) {
       ctx.addIssue({
         code: "custom",

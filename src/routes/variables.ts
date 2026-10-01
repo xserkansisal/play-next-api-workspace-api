@@ -8,23 +8,23 @@ import { variableInputSchema, variableKeySchema, variableScopeSchema } from "../
 export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
-  router.get("/", (req, res) => {
-    res.json({ variables: listVariables(db, authenticatedUserId(req)) });
+  router.get("/", async (req, res) => {
+    res.json({ variables: await listVariables(db, authenticatedUserId(req)) });
   });
 
-  router.put("/:scope/:key", (req, res) => {
+  router.put("/:scope/:key", async (req, res) => {
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
     const { value } = variableInputSchema.parse(req.body);
-    const variable = setVariable(db, authenticatedUserId(req), scope, key, value);
+    const variable = await setVariable(db, authenticatedUserId(req), scope, key, value);
     publishIfShared(events, variable.scope, key, variable.updatedAt, "updated");
     res.json(variable);
   });
 
-  router.delete("/:scope/:key", (req, res) => {
+  router.delete("/:scope/:key", async (req, res) => {
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
-    deleteVariable(db, authenticatedUserId(req), scope, key);
+    await deleteVariable(db, authenticatedUserId(req), scope, key);
     publishIfShared(events, scope, key, new Date().toISOString(), "trashed");
     res.status(204).end();
   });

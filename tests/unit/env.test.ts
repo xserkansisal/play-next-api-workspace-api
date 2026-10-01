@@ -10,7 +10,10 @@ describe("loadEnv", () => {
       PORT: 3000,
       PROXY_TIMEOUT_MS: 30_000,
       PROXY_MAX_RESPONSE_BYTES: 10_485_760,
-      DATABASE_PATH: "./data/api.sqlite",
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: 3306,
+      MYSQL_USER: "play_next_api",
+      MYSQL_DATABASE: "play_next_api",
       SSE_HEARTBEAT_MS: 15000,
       SSE_RETRY_MS: 3000,
       AUTH_CODE_PEPPER: "local-development-only-pepper-not-for-production",
@@ -36,11 +39,15 @@ describe("loadEnv", () => {
       AUTH_CODE_PEPPER: "this-is-a-test-secret-pepper-123456",
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
+      MYSQL_PASSWORD: "test-password",
     })).toMatchObject({
       NODE_ENV: "production",
       HOST: "127.0.0.1",
       PORT: 8080,
-      DATABASE_PATH: "./data/api.sqlite",
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: 3306,
+      MYSQL_USER: "play_next_api",
+      MYSQL_DATABASE: "play_next_api",
       SSE_HEARTBEAT_MS: 15000,
       SSE_RETRY_MS: 3000,
       AUTH_CODE_TTL_SECONDS: 900,
@@ -78,6 +85,7 @@ describe("loadEnv", () => {
       AUTH_CODE_PEPPER: "replace-with-a-random-secret-at-least-32-characters",
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
+      MYSQL_PASSWORD: "test-password",
     })).toThrow(EnvValidationError);
     try {
       loadEnv({ PORT: "70000" });
@@ -92,6 +100,7 @@ describe("loadEnv", () => {
       NODE_ENV: "production",
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
+      MYSQL_PASSWORD: "test-password",
       AUTH_CODE_PEPPER: pepper,
     });
 

@@ -19,16 +19,16 @@ function restoredEventTarget(resource: RestoredResource): Pick<ChangeEvent, "kin
 export function createTrashRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
-  router.get("/", (_req, res) => {
-    res.json({ entries: listTrash(db) });
+  router.get("/", async (_req, res) => {
+    res.json({ entries: await listTrash(db) });
   });
 
-  router.post("/:id/restore/check", (req, res) => {
-    res.json(checkRestore(db, req.params.id, restoreSchema.parse(req.body ?? {})));
+  router.post("/:id/restore/check", async (req, res) => {
+    res.json(await checkRestore(db, req.params.id, restoreSchema.parse(req.body ?? {})));
   });
 
-  router.post("/:id/restore", (req, res) => {
-    const { resource, restoredAt } = restoreFromTrash(
+  router.post("/:id/restore", async (req, res) => {
+    const { resource, restoredAt } = await restoreFromTrash(
       db,
       req.params.id,
       restoreSchema.parse(req.body ?? {}),

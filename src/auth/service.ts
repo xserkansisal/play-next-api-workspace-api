@@ -1,7 +1,8 @@
-import { and, desc, eq, isNull, gt } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
+import { first } from "../db/query.js";
 import { authCodes, authRateLimits, authSessions, users } from "../db/schema.js";
 import type { DbExecutor } from "../services/tree.js";
 import { generateCode, generateSessionToken, hashCode, hashSessionToken, normalizeEmail, verifyCodeHash } from "./crypto.js";
@@ -34,36 +35,41 @@ export function validateAllowedEmail(email: string): string {
   return normalized;
 }
 
-function consumeRateLimit(
+async function consumeRateLimit(
   tx: DbExecutor,
   email: string,
   purpose: "request_code" | "verify_code",
   limit: number,
   windowSeconds: number,
   now: string,
-): boolean {
-  const current = tx
-    .select()
-    .from(authRateLimits)
-    .where(and(eq(authRateLimits.email, email), eq(authRateLimits.purpose, purpose)))
-    .get();
-  const windowMillis = windowSeconds * 1000;
-  const expired = !current || Date.parse(now) - Date.parse(current.windowStartedAt) >= windowMillis;
+): Promise<boolean> {
+  await tx
+    .insert(authRateLimits)
+    .values({ email, purpose, windowStartedAt: now, attempts: 0 })
+    .onDuplicateKeyUpdate({ set: { attempts: sql`${authRateLimits.attempts}` } });
+  const current = await first(
+    tx
+      .select()
+      .from(authRateLimits)
+      .where(and(eq(authRateLimits.email, email), eq(authRateLimits.purpose, purpose)))
+      .for("update")
+      .limit(1),
+  );
+  if (!current) throw new Error("Rate-limit row disappeared while its transaction was active");
+
+  const expired = Date.parse(now) - Date.parse(current.windowStartedAt) >= windowSeconds * 1000;
   if (expired) {
-    tx.insert(authRateLimits)
-      .values({ email, purpose, windowStartedAt: now, attempts: 1 })
-      .onConflictDoUpdate({
-        target: [authRateLimits.email, authRateLimits.purpose],
-        set: { windowStartedAt: now, attempts: 1 },
-      })
-      .run();
+    await tx
+      .update(authRateLimits)
+      .set({ windowStartedAt: now, attempts: 1 })
+      .where(and(eq(authRateLimits.email, email), eq(authRateLimits.purpose, purpose)));
     return false;
   }
   if (current.attempts >= limit) return true;
-  tx.update(authRateLimits)
+  await tx
+    .update(authRateLimits)
     .set({ attempts: current.attempts + 1 })
-    .where(and(eq(authRateLimits.email, email), eq(authRateLimits.purpose, purpose)))
-    .run();
+    .where(and(eq(authRateLimits.email, email), eq(authRateLimits.purpose, purpose)));
   return false;
 }
 
@@ -86,7 +92,7 @@ export interface RequestedCode {
   expiresAt: string;
 }
 
-export function requestCode(db: AppDatabase, config: AuthServiceConfig, inputEmail: string): RequestedCode {
+export async function requestCode(db: AppDatabase, config: AuthServiceConfig, inputEmail: string): Promise<RequestedCode> {
   const email = validateAllowedEmail(inputEmail);
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -94,8 +100,8 @@ export function requestCode(db: AppDatabase, config: AuthServiceConfig, inputEma
   const code = generateCode();
   const expiresAt = isoAfter(config.AUTH_CODE_TTL_SECONDS, nowDate.getTime());
 
-  const outcome = db.transaction((tx) => {
-    const limited = consumeRateLimit(
+  const outcome = await db.transaction(async (tx) => {
+    const limited = await consumeRateLimit(
       tx,
       email,
       "request_code",
@@ -104,21 +110,19 @@ export function requestCode(db: AppDatabase, config: AuthServiceConfig, inputEma
       now,
     );
     if (limited) return false;
-    tx.update(authCodes)
+    await tx
+      .update(authCodes)
       .set({ consumedAt: now })
-      .where(and(eq(authCodes.email, email), isNull(authCodes.consumedAt)))
-      .run();
-    tx.insert(authCodes)
-      .values({
-        id: challengeId,
-        email,
-        codeHash: hashCode(config.AUTH_CODE_PEPPER, challengeId, code).toString("hex"),
-        createdAt: now,
-        expiresAt,
-      })
-      .run();
+      .where(and(eq(authCodes.email, email), isNull(authCodes.consumedAt)));
+    await tx.insert(authCodes).values({
+      id: challengeId,
+      email,
+      codeHash: hashCode(config.AUTH_CODE_PEPPER, challengeId, code).toString("hex"),
+      createdAt: now,
+      expiresAt,
+    });
     return true;
-  }, { behavior: "immediate" });
+  });
 
   if (!outcome) throw new AuthError(429, "AUTH_RATE_LIMITED", "Please wait before requesting another code");
   return { challengeId, email, code, expiresAt };
@@ -134,15 +138,20 @@ export type VerifyOutcome =
   | { ok: true; session: VerifiedSession }
   | { ok: false; rateLimited: boolean };
 
-export function verifyCode(db: AppDatabase, config: AuthServiceConfig, inputEmail: string, code: string): VerifyOutcome {
+export async function verifyCode(
+  db: AppDatabase,
+  config: AuthServiceConfig,
+  inputEmail: string,
+  code: string,
+): Promise<VerifyOutcome> {
   const email = validateAllowedEmail(inputEmail);
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const generatedSessionToken = generateSessionToken();
   const sessionExpiresAt = isoAfter(config.AUTH_SESSION_TTL_SECONDS, nowDate.getTime());
 
-  return db.transaction((tx): VerifyOutcome => {
-    const limited = consumeRateLimit(
+  return db.transaction(async (tx): Promise<VerifyOutcome> => {
+    const limited = await consumeRateLimit(
       tx,
       email,
       "verify_code",
@@ -152,15 +161,18 @@ export function verifyCode(db: AppDatabase, config: AuthServiceConfig, inputEmai
     );
     if (limited) return { ok: false, rateLimited: true };
 
-    const challenge = tx
-      .select()
-      .from(authCodes)
-      .where(and(eq(authCodes.email, email), isNull(authCodes.consumedAt)))
-      .orderBy(desc(authCodes.createdAt))
-      .get();
+    const challenge = await first(
+      tx
+        .select()
+        .from(authCodes)
+        .where(and(eq(authCodes.email, email), isNull(authCodes.consumedAt)))
+        .orderBy(desc(authCodes.createdAt))
+        .for("update")
+        .limit(1),
+    );
     if (!challenge) return { ok: false, rateLimited: false };
     if (challenge.expiresAt <= now || challenge.attempts >= config.AUTH_CODE_MAX_ATTEMPTS) {
-      tx.update(authCodes).set({ consumedAt: now }).where(eq(authCodes.id, challenge.id)).run();
+      await tx.update(authCodes).set({ consumedAt: now }).where(eq(authCodes.id, challenge.id));
       return { ok: false, rateLimited: false };
     }
 
@@ -170,36 +182,32 @@ export function verifyCode(db: AppDatabase, config: AuthServiceConfig, inputEmai
     );
     const nextAttempts = challenge.attempts + 1;
     if (!matches) {
-      tx.update(authCodes)
+      await tx
+        .update(authCodes)
         .set({
           attempts: nextAttempts,
           ...(nextAttempts >= config.AUTH_CODE_MAX_ATTEMPTS ? { consumedAt: now } : {}),
         })
-        .where(eq(authCodes.id, challenge.id))
-        .run();
+        .where(eq(authCodes.id, challenge.id));
       return { ok: false, rateLimited: false };
     }
 
-    tx.update(authCodes)
-      .set({ attempts: nextAttempts, consumedAt: now })
-      .where(eq(authCodes.id, challenge.id))
-      .run();
+    await tx.update(authCodes).set({ attempts: nextAttempts, consumedAt: now }).where(eq(authCodes.id, challenge.id));
 
-    let user = tx.select().from(users).where(eq(users.email, email)).get();
-    if (!user) {
-      const id = randomUUID();
-      tx.insert(users).values({ id, email, createdAt: now }).run();
-      user = { id, email, createdAt: now };
-    }
-    tx.insert(authSessions)
-      .values({
-        id: randomUUID(),
-        userId: user.id,
-        tokenHash: hashSessionToken(generatedSessionToken),
-        createdAt: now,
-        expiresAt: sessionExpiresAt,
-      })
-      .run();
+    await tx
+      .insert(users)
+      .values({ id: randomUUID(), email, createdAt: now })
+      .onDuplicateKeyUpdate({ set: { email } });
+    const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
+    if (!user) throw new Error("User row disappeared while a verified session was being created");
+
+    await tx.insert(authSessions).values({
+      id: randomUUID(),
+      userId: user.id,
+      tokenHash: hashSessionToken(generatedSessionToken),
+      createdAt: now,
+      expiresAt: sessionExpiresAt,
+    });
     return {
       ok: true,
       session: {
@@ -208,42 +216,44 @@ export function verifyCode(db: AppDatabase, config: AuthServiceConfig, inputEmai
         expiresAt: sessionExpiresAt,
       },
     };
-  }, { behavior: "immediate" });
+  });
 }
 
-export function findSessionUser(db: AppDatabase, token: string, now = new Date().toISOString()): AuthUser | undefined {
-  const session = db
-    .select({ id: users.id, email: users.email })
-    .from(authSessions)
-    .innerJoin(users, eq(authSessions.userId, users.id))
-    .where(
-      and(
-        eq(authSessions.tokenHash, hashSessionToken(token)),
-        isNull(authSessions.revokedAt),
-        gt(authSessions.expiresAt, now),
-      ),
-    )
-    .get();
-  return session;
+export async function findSessionUser(
+  db: AppDatabase,
+  token: string,
+  now = new Date().toISOString(),
+): Promise<AuthUser | undefined> {
+  return first(
+    db
+      .select({ id: users.id, email: users.email })
+      .from(authSessions)
+      .innerJoin(users, eq(authSessions.userId, users.id))
+      .where(
+        and(
+          eq(authSessions.tokenHash, hashSessionToken(token)),
+          isNull(authSessions.revokedAt),
+          gt(authSessions.expiresAt, now),
+        ),
+      )
+      .limit(1),
+  );
 }
 
-export function revokeSession(db: AppDatabase, token: string, now = new Date().toISOString()): void {
-  db.update(authSessions)
+export async function revokeSession(db: AppDatabase, token: string, now = new Date().toISOString()): Promise<void> {
+  await db
+    .update(authSessions)
     .set({ revokedAt: now })
-    .where(and(eq(authSessions.tokenHash, hashSessionToken(token)), isNull(authSessions.revokedAt)))
-    .run();
+    .where(and(eq(authSessions.tokenHash, hashSessionToken(token)), isNull(authSessions.revokedAt)));
 }
 
-export function invalidateCode(db: AppDatabase, challengeId: string, now = new Date().toISOString()): void {
-  const challenge = db
-    .select()
-    .from(authCodes)
-    .where(and(eq(authCodes.id, challengeId), isNull(authCodes.consumedAt)))
-    .get();
-  if (challenge) db.update(authCodes).set({ consumedAt: now }).where(eq(authCodes.id, challenge.id)).run();
+export async function invalidateCode(db: AppDatabase, challengeId: string, now = new Date().toISOString()): Promise<void> {
+  await db
+    .update(authCodes)
+    .set({ consumedAt: now })
+    .where(and(eq(authCodes.id, challengeId), isNull(authCodes.consumedAt)));
 }
 
-export function userForId(db: AppDatabase, id: string): AuthUser | undefined {
-  const user = db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, id)).get();
-  return user;
+export async function userForId(db: AppDatabase, id: string): Promise<AuthUser | undefined> {
+  return first(db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, id)).limit(1));
 }

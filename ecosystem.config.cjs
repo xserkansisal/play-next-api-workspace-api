@@ -17,7 +17,7 @@ module.exports = {
       name: "play-next-api",
       cwd: __dirname,
       script: "./dist/server.js",
-      // The SSE hub and SQLite writer are process-local; do not use cluster mode or scale out.
+      // The SSE hub is process-local; do not use cluster mode or scale out.
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
@@ -32,7 +32,11 @@ module.exports = {
         NODE_ENV: "production",
         HOST: process.env.HOST || "127.0.0.1",
         PORT: required("PORT"),
-        DATABASE_PATH: required("DATABASE_PATH"),
+        MYSQL_HOST: process.env.MYSQL_HOST || "127.0.0.1",
+        MYSQL_PORT: process.env.MYSQL_PORT || "3306",
+        MYSQL_USER: required("MYSQL_USER"),
+        MYSQL_PASSWORD: required("MYSQL_PASSWORD"),
+        MYSQL_DATABASE: required("MYSQL_DATABASE"),
         SSE_HEARTBEAT_MS: process.env.SSE_HEARTBEAT_MS || "15000",
         SSE_RETRY_MS: process.env.SSE_RETRY_MS || "3000",
         AUTH_CODE_PEPPER: required("AUTH_CODE_PEPPER"),
