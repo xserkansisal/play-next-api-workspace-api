@@ -36,6 +36,7 @@ export interface TestContextOptions {
   env?: Partial<Env>;
   emailSender?: MemoryEmailCodeSender;
   logger?: (err: unknown) => void;
+  collections?: import("../src/routes/collections.js").CollectionsRouterOptions;
 }
 
 function databaseName(path: string): string {
@@ -106,6 +107,7 @@ export async function createTestContext(path = ":memory:", options: TestContextO
     presence,
     emailCodeSender: emailSender,
     logger: options.logger ?? (() => {}),
+    collections: options.collections,
   });
   const server = http.createServer(app);
   await new Promise<void>((resolve, reject) => {

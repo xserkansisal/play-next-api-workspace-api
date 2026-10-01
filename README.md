@@ -95,6 +95,7 @@ Scoped variables retain one key per user and one global value per key.
 | PUT | `/api/v1/collections/:id` | Save name/description only |
 | DELETE | `/api/v1/collections/:id` | Move collection and its items to Trash |
 | POST | `/api/v1/collections/:id/clone` | Copy the collection and its whole active tree under a free name |
+| POST | `/api/v1/collections/:id/import` | Bulk-import a tree of folders and requests at the root or beneath a folder |
 | POST | `/api/v1/collections/:id/items` | Create a `folder` or `request` (optional `parentId`) |
 | GET | `/api/v1/collections/:id/items/:itemId` | Read one item (folders include their subtree) |
 | PUT | `/api/v1/collections/:id/items/:itemId` | Save one item's own fields; never rewrites the tree |
@@ -223,6 +224,61 @@ Name conflicts apply to folders only; sibling requests may share a name, as they
 else. A move emits a `move` change event carrying the item's new `collectionId`, and a second one
 for the source collection when the two differ, so a tab watching only the old collection stops
 showing the item under its old parent.
+
+## Bulk import
+
+`POST /api/v1/collections/:id/import` writes a whole tree of folders and requests into an active
+collection, at its root or beneath one of its active folders, in one transaction:
+
+```jsonc
+{
+  "parentId": null,          // destination folder, or null for the collection root
+  "onConflict": "rename",    // "rename" (default) or "fail"
+  "dryRun": false,           // true: validate and report, write nothing, emit nothing
+  "items": [                 // the same tree format as `items` on POST /api/v1/collections
+    { "type": "folder", "name": "Auth", "items": [
+      { "type": "request", "name": "Login", "method": "POST", "url": "{{baseUrl}}/login",
+        "headers": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "type": "json", "content": "{}" } }
+    ] }
+  ]
+}
+```
+
+Only this native format is accepted. Postman, OpenAPI, cURL and Insomnia files are converted to it
+by the client, which is also where unsupported parts (other methods, non-JSON bodies, auth
+schemes) are reported to the user.
+
+The response (`201`, or `200` for a dry run) summarises what was or would be written:
+`{ collectionId, parentId, dryRun, created: { folders, requests }, renamed: [{ path, from, to }],
+warnings: [{ path, code: "SENSITIVE_HEADER", header }], roots: [{ id, kind }], changedAt }`.
+Warnings name credential-looking headers (`Authorization`, `Cookie`, `X-API-Key`, ...) that carry a
+literal value rather than a `{{variable}}`; the value itself is never echoed.
+
+Only top-level folders can collide with what is already there. With `rename` they are renamed like
+a copy (`Auth (copy)`, `Auth (copy 2)`, ...); with `fail` the import is rejected and nothing is
+written. Requests are never renamed. Folders deeper in the payload land under new parents, so a
+duplicate folder name there is an error in the file itself. Imported items take their place in the
+usual alphabetical order; the payload's order is not stored.
+
+| Condition | Status | Code |
+|---|---|---|
+| The collection does not exist or is in Trash | `404` | `NOT_FOUND` |
+| `parentId` is not an active folder of this collection | `400` | `INVALID_PARENT` |
+| More than 2000 items | `413` | `IMPORT_TOO_LARGE` |
+| Body larger than 10 MB | `413` | `PAYLOAD_TOO_LARGE` |
+| Destination depth plus import depth exceeds 32 levels | `400` | `IMPORT_TOO_DEEP` |
+| Two folders with the same name below the payload's top level | `400` | `DUPLICATE_FOLDER_NAME` |
+| A top-level folder name is taken and `onConflict` is `fail` | `409` | `FOLDER_NAME_CONFLICT` |
+| More than 10 imports (dry runs included) per user per minute | `429` | `RATE_LIMITED` |
+
+A successful import emits one `created` change event per top-level item, or a single `updated`
+event for the collection when there are more than 50 of them. Dry runs emit nothing.
+
+`skills/api-bulk-import/SKILL.md` is a Copilot skill that other API projects can copy into
+`.github/skills/`: it generates an `api-bulk-import.json` in this format from that project's routes
+and keeps it in step as the routes change. Its `example.json` is checked against the import schema
+by `tests/unit/skillExample.test.ts`.
 
 ## Email code sign-in
 

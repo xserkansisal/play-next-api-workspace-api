@@ -10,7 +10,9 @@ const MAX_ROW_TEXT_LENGTH = 8_192;
 const MAX_BODY_LENGTH = 1_000_000;
 const MAX_VARIABLE_KEY_LENGTH = 256;
 const MAX_VARIABLE_VALUE_LENGTH = 64 * 1024;
-const MAX_TREE_DEPTH = 32;
+export const MAX_TREE_DEPTH = 32;
+export const MAX_IMPORT_NODES = 2_000;
+export const IMPORT_BODY_LIMIT = "10mb";
 
 export const idSchema = z.uuid();
 
@@ -95,7 +97,7 @@ const treeNodeSchema: z.ZodType<TreeNodeInput, unknown> = z.discriminatedUnion("
   treeRequestSchema,
 ]) as unknown as z.ZodType<TreeNodeInput, unknown>;
 
-function treeDepth(nodes: TreeNodeInput[], depth = 1): number {
+export function treeDepth(nodes: TreeNodeInput[], depth = 1): number {
   let max = nodes.length > 0 ? depth : depth - 1;
   for (const node of nodes) {
     if (node.type === "folder") max = Math.max(max, treeDepth(node.items, depth + 1));
@@ -114,6 +116,49 @@ export const createCollectionSchema = z
     path: ["items"],
   });
 export type CreateCollectionInput = z.output<typeof createCollectionSchema>;
+
+export const importItemsSchema = z
+  .strictObject({
+    parentId: parentIdSchema,
+    items: z.array(treeNodeSchema).min(1, "At least one item is required"),
+    onConflict: z.enum(["rename", "fail"]).default("rename"),
+    dryRun: z.boolean().default(false),
+  })
+  .refine((value) => treeDepth(value.items) <= MAX_TREE_DEPTH, {
+    message: `Folders may be nested at most ${MAX_TREE_DEPTH} levels deep`,
+    path: ["items"],
+  });
+export type ImportItemsInput = z.output<typeof importItemsSchema>;
+
+export interface ImportShape {
+  nodes: number;
+  depth: number;
+}
+
+/**
+ * Counts nodes and nesting of an unvalidated import body without recursion.
+ *
+ * The tree schema is recursive, so a hostile body nested thousands of levels deep would exhaust
+ * the stack inside zod before any depth rule got to run. This walks the raw JSON iteratively and
+ * stops as soon as either limit is passed, so the caller can reject it before parsing.
+ */
+export function measureImportShape(body: unknown, limits = { nodes: MAX_IMPORT_NODES, depth: MAX_TREE_DEPTH }): ImportShape {
+  const root = typeof body === "object" && body !== null ? (body as { items?: unknown }).items : undefined;
+  let nodes = 0;
+  let depth = 0;
+  const stack: Array<{ list: unknown; level: number }> = [{ list: root, level: 1 }];
+  while (stack.length > 0) {
+    const { list, level } = stack.pop()!;
+    if (!Array.isArray(list) || list.length === 0) continue;
+    nodes += list.length;
+    depth = Math.max(depth, level);
+    if (nodes > limits.nodes || depth > limits.depth) break;
+    for (const node of list) {
+      if (typeof node === "object" && node !== null) stack.push({ list: (node as { items?: unknown }).items, level: level + 1 });
+    }
+  }
+  return { nodes, depth };
+}
 
 export const updateCollectionSchema = z.strictObject({
   name: nameSchema,

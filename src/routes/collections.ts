@@ -6,16 +6,33 @@ import { createCollection, listCollections, readCollection, trashCollection, upd
 import { cloneCollection, cloneItem } from "../services/clone.js";
 import { createItem, readItem, trashItem, updateItem } from "../services/items.js";
 import { moveItem } from "../services/move.js";
+import { importItems } from "../services/import.js";
+import { HttpError } from "../errors.js";
+import { createUserRateLimit, type UserRateLimitOptions } from "../middleware/rateLimit.js";
 import {
   createCollectionSchema,
   createItemSchema,
+  importItemsSchema,
+  MAX_IMPORT_NODES,
+  MAX_TREE_DEPTH,
+  measureImportShape,
   moveItemSchema,
   updateCollectionSchema,
   updateItemSchema,
 } from "../validation/schemas.js";
 
-export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub): Router {
+export interface CollectionsRouterOptions {
+  importRateLimit?: UserRateLimitOptions;
+}
+
+// Above this many imported roots, one collection-level event replaces one event per root: every
+// event makes each watching tab refetch the tree, and enough of them would also push everything
+// else out of the replay buffer.
+const MAX_ROOT_EVENTS = 50;
+
+export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub, options: CollectionsRouterOptions = {}): Router {
   const router = Router();
+  const importRateLimit = createUserRateLimit(options.importRateLimit ?? { limit: 10, windowMs: 60_000 });
 
   router.get("/", async (_req, res) => {
     res.json({ collections: await listCollections(db) });
@@ -47,6 +64,34 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub)
     const collection = await cloneCollection(db, req.params.collectionId, authenticatedUserId(req));
     events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
     res.status(201).json(collection);
+  });
+
+  router.post("/:collectionId/import", importRateLimit, async (req, res) => {
+    // Measured before parsing: the tree schema is recursive, and this is what keeps a hostile
+    // nesting depth from reaching it.
+    const shape = measureImportShape(req.body);
+    if (shape.nodes > MAX_IMPORT_NODES) {
+      throw new HttpError(413, `An import may contain at most ${MAX_IMPORT_NODES} items`, "IMPORT_TOO_LARGE", {
+        maxItems: MAX_IMPORT_NODES,
+      });
+    }
+    if (shape.depth > MAX_TREE_DEPTH) {
+      throw new HttpError(400, `Folders may be nested at most ${MAX_TREE_DEPTH} levels deep`, "IMPORT_TOO_DEEP", {
+        maxDepth: MAX_TREE_DEPTH,
+      });
+    }
+    const input = importItemsSchema.parse(req.body);
+    const result = await importItems(db, req.params.collectionId as string, input, authenticatedUserId(req));
+    if (!result.dryRun) {
+      if (result.roots.length > MAX_ROOT_EVENTS) {
+        events.publish({ kind: "collection", id: result.collectionId, collectionId: null, operation: "updated", changedAt: result.changedAt });
+      } else {
+        for (const root of result.roots) {
+          events.publish({ kind: root.kind, id: root.id, collectionId: result.collectionId, operation: "created", changedAt: result.changedAt });
+        }
+      }
+    }
+    res.status(result.dryRun ? 200 : 201).json(result);
   });
 
   router.post("/:collectionId/items", async (req, res) => {

@@ -1,0 +1,317 @@
+{
+  "onConflict": "rename",
+  "items": [
+    {
+      "type": "folder",
+      "name": "Collections",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Items",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "DELETE /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Move item (and descendants) to Trash",
+              "method": "DELETE",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Read one item (folders include their subtree)",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/items",
+              "description": "Create a folder or request",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"type\": \"request\",\n  \"parentId\": null,\n  \"name\": \"\",\n  \"description\": \"\",\n  \"method\": \"GET\",\n  \"url\": \"\",\n  \"queryParams\": [],\n  \"headers\": [],\n  \"body\": null,\n  \"auth\": {\n    \"type\": \"none\"\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/items/:itemId/clone",
+              "description": "Copy a folder or request beside the original",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/clone",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/items/:itemId/move",
+              "description": "Reparent within or across collections",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/move",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"targetCollectionId\": \"\",\n  \"parentId\": null\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PUT /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Save one item's own fields",
+              "method": "PUT",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"type\": \"request\",\n  \"name\": \"\",\n  \"description\": \"\",\n  \"method\": \"GET\",\n  \"url\": \"\",\n  \"queryParams\": [],\n  \"headers\": [],\n  \"body\": null,\n  \"auth\": {\n    \"type\": \"none\"\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "DELETE /api/v1/collections/:collectionId",
+          "description": "Move collection and its items to Trash",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/collections",
+          "description": "List collections",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/collections",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/collections/:collectionId",
+          "description": "Read a collection with its active tree",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/collections",
+          "description": "Create a collection, optionally with a tree",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/collections",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"items\": []\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/collections/:collectionId/clone",
+          "description": "Copy the collection under a free name",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/clone",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/collections/:collectionId/import",
+          "description": "Bulk-import folders and requests",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/import",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"parentId\": null,\n  \"onConflict\": \"rename\",\n  \"dryRun\": false,\n  \"items\": []\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "PUT /api/v1/collections/:collectionId",
+          "description": "Save collection metadata",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Trash",
+      "description": "",
+      "items": [
+        {
+          "type": "request",
+          "name": "GET /api/v1/trash",
+          "description": "List trashed roots",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/trash",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/trash/:id/restore",
+          "description": "Restore a trashed root",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/trash/{{id}}/restore",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"collectionName\": \"\",\n  \"nameOverrides\": {}\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/trash/:id/restore/check",
+          "description": "Check whether a restore would conflict",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/trash/{{id}}/restore/check",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "request",
+      "name": "GET /health",
+      "description": "Liveness check",
+      "method": "GET",
+      "url": "{{baseUrl}}/health",
+      "queryParams": [],
+      "headers": [],
+      "body": null,
+      "auth": {
+        "type": "none"
+      }
+    }
+  ]
+}

@@ -17,6 +17,8 @@ import { createProxyRouter } from "./routes/proxy.js";
 import { createTrashRouter } from "./routes/trash.js";
 import { createPreferencesRouter } from "./routes/preferences.js";
 import { createPresenceRouter } from "./routes/presence.js";
+import type { CollectionsRouterOptions } from "./routes/collections.js";
+import { IMPORT_BODY_LIMIT } from "./validation/schemas.js";
 
 export interface CreateAppOptions {
   env: Env;
@@ -25,6 +27,7 @@ export interface CreateAppOptions {
   presence?: PresenceHub;
   emailCodeSender?: EmailCodeSender;
   logger?: ErrorHandlerOptions["logger"];
+  collections?: CollectionsRouterOptions;
 }
 
 // SMTP is chosen by whether it is configured, not by NODE_ENV. Tying it to production meant
@@ -43,6 +46,7 @@ export function createApp({
   presence = new PresenceHub(),
   emailCodeSender = defaultEmailCodeSender(env),
   logger,
+  collections: collectionsOptions,
 }: CreateAppOptions): Express {
   const app = express();
   const reportError = logger ?? ((error: unknown) => console.error(error));
@@ -64,6 +68,9 @@ export function createApp({
     requireAuth,
     createPreferencesRouter(db),
   );
+  // Parsed here, ahead of the general parser, so an import gets its own smaller limit; the
+  // general parser then sees the body as already read and leaves it alone.
+  app.use("/api/v1/collections/:collectionId/import", express.json({ limit: IMPORT_BODY_LIMIT }));
   app.use(express.json({ limit: "50mb" }));
   app.use("/api/v1/auth", createAuthRouter(db, env, emailCodeSender, logger));
   app.use(
@@ -73,7 +80,7 @@ export function createApp({
   );
 
   app.use("/api/v1/presence", requireAuth, createPresenceRouter(db, presence));
-  app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events));
+  app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events, collectionsOptions));
   app.use("/api/v1/environments", requireAuth, createEnvironmentsRouter(db, events));
   app.use("/api/v1/variables", requireAuth, createVariablesRouter(db, events));
   app.use("/api/v1/trash", requireAuth, createTrashRouter(db, events));
