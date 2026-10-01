@@ -131,7 +131,11 @@ describe("email code sign-in", () => {
     const context = await setup();
     const message = await issueCode(context);
     const response = await verify(context, message.to, message.code).expect(200);
-    expect(response.body.user.email).toBe(message.to);
+    expect(response.body.user).toMatchObject({
+      email: message.to,
+      firstName: "Person",
+      lastName: "",
+    });
     expect(Date.parse(response.body.expiresAt) - Date.now()).toBeGreaterThan(2_591_000_000);
     expect(Date.parse(response.body.expiresAt) - Date.now()).toBeLessThanOrEqual(2_592_000_000);
     const setCookie = setCookieHeader(response);
@@ -145,12 +149,48 @@ describe("email code sign-in", () => {
     expect(stored.token_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(Date.parse(sessionTimes.expires_at) - Date.parse(sessionTimes.created_at)).toBe(2_592_000_000);
 
-    await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookiePair(setCookie)).expect(200);
+    const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookiePair(setCookie)).expect(200);
+    expect(me.body.user).toEqual(response.body.user);
     await context.unauthenticatedApi
       .post("/api/v1/auth/sign-out")
       .set("Cookie", cookiePair(setCookie))
       .expect(204);
     await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookiePair(setCookie)).expect(401);
+  });
+
+  it("persists derived profile names and preserves existing names across later sign-ins", async () => {
+    const context = await setup();
+    const email = "serkan.taghan@sisal.com";
+    const firstMessage = await issueCode(context, email);
+    const firstLogin = await verify(context, email, firstMessage.code).expect(200);
+    expect(firstLogin.body.user).toMatchObject({ email, firstName: "Serkan", lastName: "Taghan" });
+
+    await context.db.$client.query("UPDATE users SET first_name = ?, last_name = ? WHERE email = ?", [
+      "Saved",
+      "Profile",
+      email,
+    ]);
+    const secondMessage = await issueCode(context, email);
+    const secondLogin = await verify(context, email, secondMessage.code).expect(200);
+    expect(secondLogin.body.user).toMatchObject({ email, firstName: "Saved", lastName: "Profile" });
+
+    const me = await context.unauthenticatedApi
+      .get("/api/v1/auth/me")
+      .set("Cookie", cookiePair(setCookieHeader(secondLogin)))
+      .expect(200);
+    expect(me.body.user).toMatchObject({ firstName: "Saved", lastName: "Profile" });
+  });
+
+  it("does not accept client-supplied profile names during verification", async () => {
+    const context = await setup();
+    const email = "client.names@sisal.com";
+    const message = await issueCode(context, email);
+    await context.unauthenticatedApi
+      .post("/api/v1/auth/verify-code")
+      .send({ email, code: message.code, firstName: "Attacker", lastName: "Controlled" })
+      .expect(400);
+    const login = await verify(context, email, message.code).expect(200);
+    expect(login.body.user).toMatchObject({ firstName: "Client", lastName: "Names" });
   });
 
   it("rejects expired sessions", async () => {

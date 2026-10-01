@@ -7,12 +7,15 @@ import { authCodes, authRateLimits, authSessions, users } from "../db/schema.js"
 import type { DbExecutor } from "../services/tree.js";
 import { generateCode, generateSessionToken, hashCode, hashSessionToken, normalizeEmail, verifyCodeHash } from "./crypto.js";
 import { HttpError } from "../errors.js";
+import { deriveUserProfileName } from "./profile.js";
 
 export const ALLOWED_EMAIL_DOMAINS = ["fluttersea.com", "sisal.com", "sisal.it"] as const;
 
 export interface AuthUser {
   id: string;
   email: string;
+  firstName: string;
+  lastName: string;
 }
 
 export class AuthError extends HttpError {
@@ -194,12 +197,18 @@ export async function verifyCode(
 
     await tx.update(authCodes).set({ attempts: nextAttempts, consumedAt: now }).where(eq(authCodes.id, challenge.id));
 
+    const profileName = deriveUserProfileName(email);
     await tx
       .insert(users)
-      .values({ id: randomUUID(), email, createdAt: now })
+      .values({ id: randomUUID(), email, ...profileName, createdAt: now })
       .onDuplicateKeyUpdate({ set: { email } });
     const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
     if (!user) throw new Error("User row disappeared while a verified session was being created");
+    const firstName = user.firstName || profileName.firstName;
+    const lastName = user.lastName || profileName.lastName;
+    if (firstName !== user.firstName || lastName !== user.lastName) {
+      await tx.update(users).set({ firstName, lastName }).where(eq(users.id, user.id));
+    }
 
     await tx.insert(authSessions).values({
       id: randomUUID(),
@@ -211,7 +220,7 @@ export async function verifyCode(
     return {
       ok: true,
       session: {
-        user: { id: user.id, email: user.email },
+        user: { id: user.id, email: user.email, firstName, lastName },
         sessionToken: generatedSessionToken,
         expiresAt: sessionExpiresAt,
       },
@@ -226,7 +235,7 @@ export async function findSessionUser(
 ): Promise<AuthUser | undefined> {
   return first(
     db
-      .select({ id: users.id, email: users.email })
+      .select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName })
       .from(authSessions)
       .innerJoin(users, eq(authSessions.userId, users.id))
       .where(
@@ -255,5 +264,11 @@ export async function invalidateCode(db: AppDatabase, challengeId: string, now =
 }
 
 export async function userForId(db: AppDatabase, id: string): Promise<AuthUser | undefined> {
-  return first(db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, id)).limit(1));
+  return first(
+    db
+      .select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1),
+  );
 }

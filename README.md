@@ -27,6 +27,8 @@ npm run dev            # http://localhost:3000/health
 | `npm run db:generate` | Generate a MySQL migration from `src/db/schema.ts` into `drizzle-mysql/` |
 | `npm run db:migrate`  | Apply pending migrations to the configured MySQL database (also applied on startup) |
 | `npm run db:check`    | Check generated migrations for consistency     |
+| `npm run presence:seed` | Idempotently create ten database-backed presence test users at random active resources (development/test only) |
+| `npm run presence:clear` | Remove seeded presence test users (development/test only) |
 | `npm run mail:check` | Connects and authenticates against the configured SMTP relay without sending anything (exit 1 on failure) |
 
 See [Deployment and operations](docs/deployment.md) for MySQL provisioning, PM2 deployment, migrations, and backup/restore.
@@ -84,8 +86,8 @@ Scoped variables retain one key per user and one global value per key.
 | Method | Route | Description |
 | ------ | ----- | ----------- |
 | POST | `/api/v1/auth/request-code` | Request a sign-in code by email |
-| POST | `/api/v1/auth/verify-code` | Verify a code and issue the session cookie |
-| GET | `/api/v1/auth/me` | Read the current signed-in user |
+| POST | `/api/v1/auth/verify-code` | Verify a code, return the current user's profile, and issue the session cookie |
+| GET | `/api/v1/auth/me` | Read the current signed-in user's persisted profile |
 | POST | `/api/v1/auth/sign-out` | Revoke the current server-side session |
 | GET | `/api/v1/collections` | Active collections (metadata) |
 | POST | `/api/v1/collections` | Create a collection, optionally with a nested `items` tree (atomic) |
@@ -112,14 +114,32 @@ Scoped variables retain one key per user and one global value per key.
 | POST | `/api/v1/environments/:id/variables` | Append one variable row to an environment; enabled-key conflicts return `409` |
 | GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
 | PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
+| PUT | `/api/v1/presence` | Refresh or clear the current browser tab's collection/folder/request location |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
-| GET | `/api/v1/events` | Server-Sent Events stream of value-free change notifications |
+| GET | `/api/v1/events` | Server-Sent Events stream of value-free change notifications and live presence snapshots |
 
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`
 (`VALIDATION_ERROR`, `INVALID_PARENT`, `ITEM_TYPE_MISMATCH`, `INVALID_RESTORE_OVERRIDE`).
+
+The authenticated user object returned by `verify-code` and `me` includes `firstName` and
+`lastName`, derived from the verified email address on first sign-in and persisted in `users`.
+These fields are read-only; there is no endpoint for editing or looking up another user's profile.
+Deploy migration `0004_spooky_trish_tilby` before deploying API code that reads these fields.
+
+Presence is session-authenticated and ephemeral: each `(user, clientId)` tab has an independent
+location with a maximum 45-second TTL. The `/api/v1/events` stream sends a full `presence`
+snapshot on connection and whenever the snapshot changes. Snapshots contain display names and
+resource IDs only; they never include email addresses, request URLs, request data, or tokens.
+
+To preview presence without hard-coded frontend fixtures, create active workspace resources,
+run `npm run presence:seed`, and restart the API with `PRESENCE_SIMULATOR_ENABLED=true`. The ten
+synthetic profiles and their randomly assigned active locations are stored in MySQL. The API
+re-reads those records and refreshes their in-memory heartbeats every 15 seconds, changing their
+stored random location once per minute. This switch is rejected in production. Use
+`npm run presence:clear` to remove the synthetic users.
 
 ## Scoped variables
 

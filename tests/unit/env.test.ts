@@ -28,6 +28,7 @@ describe("loadEnv", () => {
       AUTH_COOKIE_SECURE: false,
       SMTP_PORT: 587,
       SMTP_SECURE: false,
+      PRESENCE_SIMULATOR_ENABLED: false,
     });
   });
 
@@ -59,6 +60,18 @@ describe("loadEnv", () => {
     expect(loadEnv({ CORS_ORIGIN: "http://localhost:5173" }).CORS_ORIGIN).toBe("http://localhost:5173");
     expect(() => loadEnv({ CORS_ORIGIN: "http://localhost:5173/path" })).toThrow(EnvValidationError);
     expect(() => loadEnv({ CORS_ORIGIN: "localhost:5173" })).toThrow(EnvValidationError);
+  });
+
+  it("allows the presence simulator only outside production", () => {
+    expect(loadEnv({ PRESENCE_SIMULATOR_ENABLED: "true" }).PRESENCE_SIMULATOR_ENABLED).toBe(true);
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      PRESENCE_SIMULATOR_ENABLED: "true",
+      AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
+      MYSQL_PASSWORD: "test-password",
+      SMTP_HOST: "smtp.test.local",
+      SMTP_FROM: "sender@sisal.com",
+    })).toThrow(EnvValidationError);
   });
 
   it('accepts "*" as the one value meaning every origin', () => {

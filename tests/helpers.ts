@@ -10,12 +10,14 @@ import { loadEnv, type Env } from "../src/config/env.js";
 import { createApp } from "../src/app.js";
 import { closeDatabase, openDatabase, type AppDatabase } from "../src/db/client.js";
 import { ChangeEventHub } from "../src/events/hub.js";
+import { PresenceHub } from "../src/events/presence.js";
 import { MemoryEmailCodeSender } from "../src/auth/email.js";
 
 export interface TestContext {
   db: AppDatabase;
   app: Express;
   events: ChangeEventHub;
+  presence: PresenceHub;
   api: ReturnType<typeof request.agent>;
   unauthenticatedApi: ReturnType<typeof request>;
   emailSender: MemoryEmailCodeSender;
@@ -28,6 +30,8 @@ export interface TestContextOptions {
   heartbeatMs?: number;
   retryMs?: number;
   replayBufferSize?: number;
+  presenceTtlMs?: number;
+  presenceSweepIntervalMs?: number;
   authenticate?: boolean;
   env?: Partial<Env>;
   emailSender?: MemoryEmailCodeSender;
@@ -90,11 +94,16 @@ export async function createTestContext(path = ":memory:", options: TestContextO
   const env = loadEnv(envSource);
   const db = await openDatabase(env);
   const events = new ChangeEventHub({ replayBufferSize: options.replayBufferSize });
+  const presence = new PresenceHub({
+    ttlMs: options.presenceTtlMs,
+    sweepIntervalMs: options.presenceSweepIntervalMs,
+  });
   const emailSender = options.emailSender ?? new MemoryEmailCodeSender();
   const app = createApp({
     env,
     db,
     events,
+    presence,
     emailCodeSender: emailSender,
     logger: options.logger ?? (() => {}),
   });
@@ -128,12 +137,14 @@ export async function createTestContext(path = ":memory:", options: TestContextO
     db,
     app,
     events,
+    presence,
     api,
     unauthenticatedApi,
     emailSender,
     sessionCookie,
     close: async () => {
       events.close();
+      presence.close();
       try {
         await new Promise<void>((resolve, reject) => {
           server.close((err) => (err ? reject(err) : resolve()));

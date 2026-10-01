@@ -25,6 +25,8 @@ const description = (name: string) => text(name).notNull().default(sql`('')`);
 export const users = mysqlTable("users", {
   id: id("id").primaryKey(),
   email: varchar("email", { length: 320 }).notNull().unique(),
+  firstName: varchar("first_name", { length: 320 }).notNull().default(""),
+  lastName: varchar("last_name", { length: 320 }).notNull().default(""),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -124,6 +126,28 @@ export const items = mysqlTable(
     index("items_collection_parent_idx").on(t.collectionId, t.parentId),
     index("items_trash_root_idx").on(t.trashRootId),
     uniqueIndex("items_active_sibling_folder_name_unique").on(t.collectionId, t.parentKey, t.activeFolderNameKey),
+  ],
+);
+
+export const presenceTestUsers = mysqlTable(
+  "presence_test_users",
+  {
+    userId: id("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: id("client_id").notNull().unique(),
+    locationKind: mysqlEnum("location_kind", ["collection", "folder", "request"]).notNull(),
+    collectionId: id("collection_id")
+      .notNull()
+      .references(() => collections.id),
+    itemId: id("item_id").references(() => items.id),
+    locationUpdatedAt: timestamp("location_updated_at").notNull(),
+  },
+  (t) => [
+    check(
+      "presence_test_location_shape_check",
+      sql`(${t.locationKind} = 'collection' AND ${t.itemId} IS NULL) OR (${t.locationKind} IN ('folder', 'request') AND ${t.itemId} IS NOT NULL)`,
+    ),
   ],
 );
 

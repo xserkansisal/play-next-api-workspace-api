@@ -29,6 +29,20 @@
       "when": 1790854193300,
       "tag": "0003_slippery_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1790880408621,
+      "tag": "0004_spooky_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1790887721122,
+      "tag": "0005_youthful_tarantula",
+      "breakpoints": true
     }
   ]
 }

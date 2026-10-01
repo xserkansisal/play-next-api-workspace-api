@@ -2,15 +2,22 @@ import { createApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { closeDatabase, openDatabase } from "./db/client.js";
 import { ChangeEventHub } from "./events/hub.js";
+import { PresenceHub } from "./events/presence.js";
 import { allowsAnyHost, parseAllowedHosts } from "./services/proxy.js";
 import { allowsAnyOrigin } from "./middleware/cors.js";
+import { startPresenceSimulator } from "./presence/simulator.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
   const db = await openDatabase(env, { migrate: true });
   // Single writable process: change events are fanned out in memory only.
   const events = new ChangeEventHub();
-  const app = createApp({ env, db, events });
+  const presence = new PresenceHub();
+  const app = createApp({ env, db, events, presence });
+  const presenceSimulator = env.PRESENCE_SIMULATOR_ENABLED
+    ? startPresenceSimulator(db, presence)
+    : undefined;
+  if (presenceSimulator) console.log("Development presence simulator enabled.");
 
   if (allowsAnyHost(parseAllowedHosts(env.PROXY_ALLOWED_HOSTS))) {
     console.warn(
@@ -33,16 +40,22 @@ async function main(): Promise<void> {
     console.log(`Received ${signal}, shutting down`);
     events.close();
     server.close((err) => {
-      void closeDatabase(db).then(() => {
-        if (err) {
-          console.error(err);
+      void Promise.resolve(presenceSimulator?.stop())
+        .then(() => {
+          presence.close();
+          return closeDatabase(db);
+        })
+        .then(() => {
+          if (err) {
+            console.error(err);
+            process.exit(1);
+          }
+          process.exit(0);
+        })
+        .catch((closeError: unknown) => {
+          console.error(closeError);
           process.exit(1);
-        }
-        process.exit(0);
-      }).catch((closeError: unknown) => {
-        console.error(closeError);
-        process.exit(1);
-      });
+        });
     });
   }
 

@@ -72,9 +72,17 @@ const baseEnvSchema = z.object({
   PROXY_ALLOWED_HOSTS: optionalStringEnv(z.string().min(1)),
   PROXY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000),
   PROXY_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),
+  PRESENCE_SIMULATOR_ENABLED: booleanEnv(false),
 });
 
 const envSchema = baseEnvSchema.superRefine((env, ctx) => {
+  if (env.NODE_ENV === "production" && env.PRESENCE_SIMULATOR_ENABLED) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["PRESENCE_SIMULATOR_ENABLED"],
+      message: "is only allowed in development and test environments",
+    });
+  }
   if (env.NODE_ENV === "production") {
     if (!env.MYSQL_PASSWORD) {
       ctx.addIssue({ code: "custom", path: ["MYSQL_PASSWORD"], message: "is required in production" });

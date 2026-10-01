@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import type { Env } from "./config/env.js";
 import type { AppDatabase } from "./db/client.js";
 import { ChangeEventHub } from "./events/hub.js";
+import { PresenceHub } from "./events/presence.js";
 import { MemoryEmailCodeSender, SmtpEmailCodeSender, type EmailCodeSender } from "./auth/email.js";
 import { createAuthenticationMiddleware } from "./middleware/authenticate.js";
 import { createCorsMiddleware } from "./middleware/cors.js";
@@ -15,11 +16,13 @@ import { createHealthRouter } from "./routes/health.js";
 import { createProxyRouter } from "./routes/proxy.js";
 import { createTrashRouter } from "./routes/trash.js";
 import { createPreferencesRouter } from "./routes/preferences.js";
+import { createPresenceRouter } from "./routes/presence.js";
 
 export interface CreateAppOptions {
   env: Env;
   db: AppDatabase;
   events?: ChangeEventHub;
+  presence?: PresenceHub;
   emailCodeSender?: EmailCodeSender;
   logger?: ErrorHandlerOptions["logger"];
 }
@@ -37,10 +40,18 @@ export function createApp({
   env,
   db,
   events = new ChangeEventHub(),
+  presence = new PresenceHub(),
   emailCodeSender = defaultEmailCodeSender(env),
   logger,
 }: CreateAppOptions): Express {
   const app = express();
+  const reportError = logger ?? ((error: unknown) => console.error(error));
+
+  events.observe((event) => {
+    if (event.operation === "trashed" || event.operation === "move") {
+      void presence.removeInactiveResources(db).catch(reportError);
+    }
+  });
 
   app.disable("x-powered-by");
   app.use(createCorsMiddleware(env.CORS_ORIGIN));
@@ -58,9 +69,10 @@ export function createApp({
   app.use(
     "/api/v1/events",
     requireAuth,
-    createEventsRouter(events, { heartbeatMs: env.SSE_HEARTBEAT_MS, retryMs: env.SSE_RETRY_MS }),
+    createEventsRouter(events, presence, db, { heartbeatMs: env.SSE_HEARTBEAT_MS, retryMs: env.SSE_RETRY_MS }),
   );
 
+  app.use("/api/v1/presence", requireAuth, createPresenceRouter(db, presence));
   app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events));
   app.use("/api/v1/environments", requireAuth, createEnvironmentsRouter(db, events));
   app.use("/api/v1/variables", requireAuth, createVariablesRouter(db, events));

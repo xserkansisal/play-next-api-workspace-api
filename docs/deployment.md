@@ -7,6 +7,14 @@ Nginx serves the web build and reverse-proxies `/api` to the PM2-managed API. Th
 single origin, so CORS is not needed for normal operation. `CORS_ORIGIN` is only relevant when
 accessing the API port directly from a browser or when developing against Vite.
 
+Live presence is held in memory, not persisted. Its 45-second TTL removes abandoned tabs; a
+process restart clears all active locations, which connected browsers republish on their next
+heartbeat. Presence fan-out, like the change-event stream, requires one writable API process.
+The optional synthetic presence simulator is restricted to development and test environments.
+Its ten profiles and randomly selected active resource locations are stored in the
+`presence_test_users` and `users` tables; enable it with `PRESENCE_SIMULATOR_ENABLED=true` after
+running `npm run presence:seed`. Run `npm run presence:clear` to remove those generated records.
+
 When nginx runs on the API VM, bind the API to `127.0.0.1` so the service port is not exposed to
 other machines. The API's `HOST` setting is configurable; while the application default is
 `0.0.0.0`, the PM2 ecosystem config defaults to loopback. Verify the bound address and port
@@ -51,6 +59,14 @@ GRANT ALL PRIVILEGES ON play_next_api.* TO 'play_next_api'@'127.0.0.1';
 ```
 
 ## Configure environment and migrate
+
+Apply pending database migrations before deploying an API version that uses newly added columns.
+Migration `0004_spooky_trish_tilby` adds profile-name columns with empty defaults, so the previous
+API version remains compatible during a rolling deployment. The migration backfills existing
+users from the email local part, ignores empty dot-separated pieces, and only fills blank names.
+Invalid legacy addresses without a non-empty local part retain empty names. The migration can be
+rolled back by dropping both columns, but the derived values cannot be reconstructed after later
+edits; back up the database before rollback.
 
 Export the production settings in the shell or service-management environment used to invoke
 PM2. The ecosystem file requires `PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, and `AUTH_CODE_PEPPER`; production

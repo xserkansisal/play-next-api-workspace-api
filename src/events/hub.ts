@@ -52,6 +52,7 @@ export class ChangeEventHub {
   private readonly buffer: BufferedChangeEvent[] = [];
   private readonly bufferSize: number;
   private readonly listeners = new Set<Listener>();
+  private readonly observers = new Set<ChangeListener>();
   private readonly closeHandlers = new Set<() => void>();
   private closed = false;
 
@@ -99,6 +100,13 @@ export class ChangeEventHub {
         this.listeners.delete(listener);
       }
     }
+    for (const observer of [...this.observers]) {
+      try {
+        observer(sequenced);
+      } catch {
+        this.observers.delete(observer);
+      }
+    }
     return sequenced;
   }
 
@@ -108,6 +116,14 @@ export class ChangeEventHub {
     this.listeners.add(entry);
     return () => {
       this.listeners.delete(entry);
+    };
+  }
+
+  observe(listener: ChangeListener): () => void {
+    if (this.closed) return () => {};
+    this.observers.add(listener);
+    return () => {
+      this.observers.delete(listener);
     };
   }
 
@@ -145,6 +161,7 @@ export class ChangeEventHub {
     for (const handler of [...this.closeHandlers]) handler();
     this.closeHandlers.clear();
     this.listeners.clear();
+    this.observers.clear();
   }
 }
 
