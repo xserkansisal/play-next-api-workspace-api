@@ -1,5 +1,6 @@
 import { Router, type Response } from "express";
 import type { ChangeEventHub, SequencedChangeEvent } from "../events/hub.js";
+import { authenticatedUserId } from "../middleware/authenticate.js";
 
 export interface EventsRouterOptions {
   heartbeatMs: number;
@@ -18,6 +19,7 @@ export function createEventsRouter(hub: ChangeEventHub, options: EventsRouterOpt
   const maxBufferedBytes = options.maxBufferedBytes ?? 1_000_000;
 
   router.get("/", (req, res: Response) => {
+    const userId = authenticatedUserId(req);
     if (hub.isClosed) {
       res.status(503).set("Retry-After", String(Math.ceil(options.retryMs / 1000))).end();
       return;
@@ -58,7 +60,7 @@ export function createEventsRouter(hub: ChangeEventHub, options: EventsRouterOpt
     const lastEventId =
       req.get("Last-Event-ID") ?? (typeof req.query.lastEventId === "string" ? req.query.lastEventId : undefined);
     if (lastEventId) {
-      const replay = hub.replaySince(lastEventId);
+      const replay = hub.replaySince(lastEventId, userId);
       if (replay.complete) {
         for (const event of replay.events) write(formatEvent(event));
       } else {
@@ -71,7 +73,7 @@ export function createEventsRouter(hub: ChangeEventHub, options: EventsRouterOpt
     if (closed) return;
 
     // Replay and subscribe run in the same synchronous turn, so no event can fall between them.
-    unsubscribe = hub.subscribe((event) => write(formatEvent(event)));
+    unsubscribe = hub.subscribe((event) => write(formatEvent(event)), userId);
     heartbeat = setInterval(() => write(`: heartbeat ${new Date().toISOString()}\n\n`), options.heartbeatMs);
     heartbeat.unref();
     offClose = hub.onClose(end);

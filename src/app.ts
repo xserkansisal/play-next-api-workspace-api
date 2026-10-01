@@ -14,6 +14,7 @@ import { createAuthRouter } from "./routes/auth.js";
 import { createHealthRouter } from "./routes/health.js";
 import { createProxyRouter } from "./routes/proxy.js";
 import { createTrashRouter } from "./routes/trash.js";
+import { createPreferencesRouter } from "./routes/preferences.js";
 
 export interface CreateAppOptions {
   env: Env;
@@ -45,9 +46,15 @@ export function createApp({
   app.use(createCorsMiddleware(env.CORS_ORIGIN));
 
   app.use("/health", createHealthRouter());
+  const requireAuth = createAuthenticationMiddleware(db, env.AUTH_COOKIE_NAME);
+  app.use(
+    "/api/v1/preferences",
+    express.json({ limit: "256kb" }),
+    requireAuth,
+    createPreferencesRouter(db),
+  );
   app.use(express.json({ limit: "50mb" }));
   app.use("/api/v1/auth", createAuthRouter(db, env, emailCodeSender, logger));
-  const requireAuth = createAuthenticationMiddleware(db, env.AUTH_COOKIE_NAME);
   app.use(
     "/api/v1/events",
     requireAuth,

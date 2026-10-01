@@ -34,6 +34,25 @@ describe("ChangeEventHub", () => {
     expect(good).toHaveBeenCalledTimes(2);
   });
 
+  it("delivers user-targeted events only to that user's listeners and replays them privately", () => {
+    const hub = new ChangeEventHub();
+    const alice = vi.fn();
+    const bob = vi.fn();
+    const anonymous = vi.fn();
+    hub.subscribe(alice, "alice");
+    hub.subscribe(bob, "bob");
+    hub.subscribe(anonymous);
+
+    const privateEvent = hub.publishToUser("alice", event("private"));
+    const sharedEvent = hub.publish(event("shared"));
+
+    expect(alice.mock.calls.map(([value]) => value.id)).toEqual(["private", "shared"]);
+    expect(bob.mock.calls.map(([value]) => value.id)).toEqual(["shared"]);
+    expect(anonymous.mock.calls.map(([value]) => value.id)).toEqual(["shared"]);
+    expect(hub.replaySince(`${hub.epoch}:0`, "bob").events).toEqual([sharedEvent]);
+    expect(hub.replaySince(`${hub.epoch}:0`, "alice").events).toEqual([privateEvent, sharedEvent]);
+  });
+
   it("replays within the buffer and reports gaps", () => {
     const hub = new ChangeEventHub({ replayBufferSize: 2 });
     const ids = ["a", "b", "c"].map((id) => hub.publish(event(id)).eventId);

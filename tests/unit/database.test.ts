@@ -35,6 +35,7 @@ describe("MySQL database foundation", () => {
         "request_headers",
         "request_query_params",
         "users",
+        "user_preferences",
         "variables",
       ]),
     );

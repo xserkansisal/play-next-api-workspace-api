@@ -27,6 +27,16 @@ export interface ReplayResult {
   events: SequencedChangeEvent[];
 }
 
+interface BufferedChangeEvent {
+  event: SequencedChangeEvent;
+  audienceUserId?: string;
+}
+
+interface Listener {
+  callback: ChangeListener;
+  userId?: string;
+}
+
 export interface ChangeEventHubOptions {
   /** Number of recent events kept in memory for Last-Event-ID replay. */
   replayBufferSize?: number;
@@ -39,9 +49,9 @@ export interface ChangeEventHubOptions {
 export class ChangeEventHub {
   readonly epoch = randomUUID();
   private sequence = 0;
-  private readonly buffer: SequencedChangeEvent[] = [];
+  private readonly buffer: BufferedChangeEvent[] = [];
   private readonly bufferSize: number;
-  private readonly listeners = new Set<ChangeListener>();
+  private readonly listeners = new Set<Listener>();
   private readonly closeHandlers = new Set<() => void>();
   private closed = false;
 
@@ -58,6 +68,14 @@ export class ChangeEventHub {
   }
 
   publish(event: ChangeEvent): SequencedChangeEvent {
+    return this.publishForAudience(event);
+  }
+
+  publishToUser(userId: string, event: ChangeEvent): SequencedChangeEvent {
+    return this.publishForAudience(event, userId);
+  }
+
+  private publishForAudience(event: ChangeEvent, audienceUserId?: string): SequencedChangeEvent {
     this.sequence += 1;
     // Copy only the known keys so callers cannot leak extra fields into the stream.
     const sequenced: SequencedChangeEvent = {
@@ -69,12 +87,13 @@ export class ChangeEventHub {
       changedAt: event.changedAt,
     };
     if (this.bufferSize > 0) {
-      this.buffer.push(sequenced);
+      this.buffer.push({ event: sequenced, audienceUserId });
       if (this.buffer.length > this.bufferSize) this.buffer.shift();
     }
     for (const listener of [...this.listeners]) {
+      if (audienceUserId !== undefined && listener.userId !== audienceUserId) continue;
       try {
-        listener(sequenced);
+        listener.callback(sequenced);
       } catch {
         // A failing subscriber must not affect the writer or other subscribers.
         this.listeners.delete(listener);
@@ -83,16 +102,17 @@ export class ChangeEventHub {
     return sequenced;
   }
 
-  subscribe(listener: ChangeListener): () => void {
+  subscribe(listener: ChangeListener, userId?: string): () => void {
     if (this.closed) return () => {};
-    this.listeners.add(listener);
+    const entry = { callback: listener, userId };
+    this.listeners.add(entry);
     return () => {
-      this.listeners.delete(listener);
+      this.listeners.delete(entry);
     };
   }
 
   /** Returns events published after `lastEventId`, if this process can still provide all of them. */
-  replaySince(lastEventId: string): ReplayResult {
+  replaySince(lastEventId: string, userId?: string): ReplayResult {
     const separator = lastEventId.lastIndexOf(":");
     const epoch = lastEventId.slice(0, separator);
     const seq = Number(lastEventId.slice(separator + 1));
@@ -101,7 +121,13 @@ export class ChangeEventHub {
     }
     const oldestBuffered = this.sequence - this.buffer.length + 1;
     if (seq + 1 < oldestBuffered) return { complete: false, events: [] };
-    return { complete: true, events: this.buffer.filter((e) => sequenceOf(e) > seq) };
+    return {
+      complete: true,
+      events: this.buffer
+        .filter((entry) => sequenceOf(entry.event) > seq)
+        .filter((entry) => entry.audienceUserId === undefined || entry.audienceUserId === userId)
+        .map((entry) => entry.event),
+    };
   }
 
   /** Registers a callback invoked once when the hub closes (e.g. to end an SSE stream). */

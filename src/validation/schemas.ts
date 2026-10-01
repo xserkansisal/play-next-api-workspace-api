@@ -8,6 +8,8 @@ const MAX_URL_LENGTH = 8_192;
 const MAX_ROWS = 500;
 const MAX_ROW_TEXT_LENGTH = 8_192;
 const MAX_BODY_LENGTH = 1_000_000;
+const MAX_VARIABLE_KEY_LENGTH = 256;
+const MAX_VARIABLE_VALUE_LENGTH = 64 * 1024;
 const MAX_TREE_DEPTH = 32;
 
 export const idSchema = z.uuid();
@@ -118,9 +120,9 @@ export const environmentVariableSchema = z.strictObject({
     .string()
     .trim()
     .min(1, "Variable key must not be empty")
-    .max(MAX_NAME_LENGTH)
+    .max(MAX_VARIABLE_KEY_LENGTH)
     .regex(/^[^\s{}]+$/, "Variable key must not contain whitespace or braces"),
-  value: z.string().max(MAX_ROW_TEXT_LENGTH),
+  value: z.string().max(MAX_VARIABLE_VALUE_LENGTH),
   enabled: z.boolean().default(true),
 });
 
@@ -135,6 +137,53 @@ export const variableInputSchema = z.strictObject({
   value: z.string().max(MAX_BODY_LENGTH),
 });
 export type VariableInput = z.output<typeof variableInputSchema>;
+
+export const variableCreateInputSchema = z.strictObject({
+  key: variableKeySchema,
+  value: z.string().max(MAX_VARIABLE_VALUE_LENGTH),
+});
+
+export const environmentVariableCreateInputSchema = z.strictObject({
+  key: variableKeySchema,
+  value: z.string().max(MAX_VARIABLE_VALUE_LENGTH),
+  enabled: z.boolean().default(true),
+});
+export type EnvironmentVariableCreateInput = z.output<typeof environmentVariableCreateInputSchema>;
+
+export const variablePatchSchema = z
+  .strictObject({
+    key: variableKeySchema.optional(),
+    value: z.string().max(MAX_BODY_LENGTH).optional(),
+  })
+  .refine((value) => value.key !== undefined || value.value !== undefined, {
+    message: "At least one of key or value must be provided",
+  });
+
+const variableOrderSortSchema = z.looseObject({
+  field: z.enum(["key", "value"]),
+  direction: z.enum(["asc", "desc"]),
+});
+
+const variableOrderManualSchema = z.looseObject({
+  user: z.array(z.string().max(256)).max(1000),
+  global: z.array(z.string().max(256)).max(1000),
+  environments: z.record(z.string(), z.array(z.string().max(256)).max(1000)).superRefine((entries, ctx) => {
+    if (Object.keys(entries).length > 200) {
+      ctx.addIssue({
+        code: "custom",
+        message: "manual.environments must contain at most 200 entries",
+      });
+    }
+  }),
+});
+
+export const variableOrderPreferencesSchema = z.looseObject({
+  version: z.literal(1),
+  sort: variableOrderSortSchema.nullable(),
+  manual: variableOrderManualSchema,
+  updatedAt: z.string(),
+});
+export type VariableOrderPreferences = z.output<typeof variableOrderPreferencesSchema>;
 
 export const variableDisplayOrderSchema = z
   .strictObject({
@@ -158,19 +207,19 @@ export type VariableDisplayOrderInput = z.output<typeof variableDisplayOrderSche
 export const environmentInputSchema = z
   .strictObject({
     name: nameSchema,
-    variables: z.array(environmentVariableSchema).max(MAX_ROWS).default([]),
+    variables: z.array(environmentVariableSchema).max(1000).default([]),
   })
   .superRefine((value, ctx) => {
     const seen = new Set<string>();
     value.variables.forEach((variable, index) => {
-      if (seen.has(variable.key)) {
+      if (variable.enabled && seen.has(variable.key)) {
         ctx.addIssue({
           code: "custom",
           message: `Duplicate variable key "${variable.key}"`,
           path: ["variables", index, "key"],
         });
       }
-      seen.add(variable.key);
+      if (variable.enabled) seen.add(variable.key);
     });
   });
 export type EnvironmentInput = z.output<typeof environmentInputSchema>;

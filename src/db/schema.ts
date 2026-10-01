@@ -196,13 +196,17 @@ export const environmentVariables = mysqlTable(
       .notNull()
       .references(() => environments.id),
     position: int("position").notNull(),
-    key: varchar("key", { length: 200 }).notNull(),
-    value: varchar("value", { length: 8192 }).notNull(),
+    key: varchar("key", { length: 256 }).notNull(),
     enabled: boolean("enabled").notNull().default(true),
+    enabledKey: varchar("enabled_key", { length: 256 }).generatedAlwaysAs(
+      sql`CASE WHEN ${sql.identifier("enabled")} = 1 THEN ${sql.identifier("key")} ELSE NULL END`,
+      { mode: "virtual" },
+    ),
+    value: mediumtext("value").notNull(),
   },
   (t) => [
     primaryKey({ name: "environment_variables_pk", columns: [t.environmentId, t.position] }),
-    uniqueIndex("environment_variables_key_unique").on(t.environmentId, t.key),
+    uniqueIndex("environment_variables_enabled_key_unique").on(t.environmentId, t.enabledKey),
     check("environment_variables_position_check", sql`${t.position} >= 0`),
   ],
 );
@@ -213,12 +217,12 @@ export const variables = mysqlTable(
     id: id("id").primaryKey(),
     scope: mysqlEnum("scope", ["user", "global"]).notNull(),
     userId: id("user_id").references(() => users.id),
-    key: varchar("key", { length: 200 }).notNull(),
-    userScopedKey: varchar("user_scoped_key", { length: 200 }).generatedAlwaysAs(
+    key: varchar("key", { length: 256 }).notNull(),
+    userScopedKey: varchar("user_scoped_key", { length: 256 }).generatedAlwaysAs(
       sql`CASE WHEN ${sql.identifier("scope")} = 'user' THEN ${sql.identifier("key")} ELSE NULL END`,
       { mode: "virtual" },
     ),
-    globalScopedKey: varchar("global_scoped_key", { length: 200 }).generatedAlwaysAs(
+    globalScopedKey: varchar("global_scoped_key", { length: 256 }).generatedAlwaysAs(
       sql`CASE WHEN ${sql.identifier("scope")} = 'global' THEN ${sql.identifier("key")} ELSE NULL END`,
       { mode: "virtual" },
     ),
@@ -243,3 +247,15 @@ export const variableDisplayOrders = mysqlTable("variable_display_orders", {
     .references(() => users.id),
   order: json("order").$type<string[]>().notNull(),
 });
+
+export const userPreferences = mysqlTable(
+  "user_preferences",
+  {
+    userId: id("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    value: json("value").notNull(),
+  },
+  (t) => [primaryKey({ name: "user_preferences_pk", columns: [t.userId, t.name] })],
+);

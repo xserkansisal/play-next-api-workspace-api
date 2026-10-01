@@ -26,6 +26,7 @@ describe("scoped variables", () => {
     await ctx.unauthenticatedApi.get("/api/v1/variables").expect(401);
     await ctx.unauthenticatedApi.get("/api/v1/variables/order").expect(401);
     await ctx.unauthenticatedApi.put("/api/v1/variables/order").send({ order: [] }).expect(401);
+    await ctx.unauthenticatedApi.post("/api/v1/variables/user").send({ key: "token", value: "x" }).expect(401);
   });
 
   it("persists a complete display order privately, including names with no API variable row", async () => {
@@ -74,6 +75,31 @@ describe("scoped variables", () => {
 
     const listed = await ctx.api.get("/api/v1/variables").expect(200);
     expect(listed.body.variables).toEqual([expect.objectContaining({ scope: "user", key: "token", value: "abc" })]);
+  });
+
+  it("creates scoped variables without overwriting existing keys", async () => {
+    const other = await signInAs(ctx, "global-create-other@sisal.com");
+    const created = await ctx.api
+      .post("/api/v1/variables/user")
+      .send({ key: "token", value: "" })
+      .expect(201);
+    expect(created.body).toMatchObject({ scope: "user", key: "token", value: "" });
+
+    await ctx.api.post("/api/v1/variables/user").send({ key: "token", value: "replacement" }).expect(409);
+    await ctx.api.post("/api/v1/variables/global").send({ key: "shared", value: "first" }).expect(201);
+    await other.post("/api/v1/variables/global").send({ key: "shared", value: "second" }).expect(409);
+    expect((await other.get("/api/v1/variables").expect(200)).body.variables).toEqual([
+      expect.objectContaining({ scope: "global", key: "shared", value: "first" }),
+    ]);
+  });
+
+  it("validates scoped variable create keys and value limits", async () => {
+    await ctx.api.post("/api/v1/variables/user").send({ key: "two words", value: "" }).expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe("VARIABLE_KEY_INVALID"));
+    await ctx.api.post("/api/v1/variables/user").send({ key: "ok", value: 1 }).expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe("VARIABLE_VALUE_INVALID"));
+    await ctx.api.post("/api/v1/variables/user").send({ key: "ok", value: "x".repeat(64 * 1024 + 1) }).expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe("VARIABLE_VALUE_INVALID"));
   });
 
   it("replaces a value rather than accumulating readings of the same key", async () => {
@@ -129,11 +155,45 @@ describe("scoped variables", () => {
     expect(listed.body.variables).toEqual([expect.objectContaining({ scope: "global", value: "shared" })]);
   });
 
+  it("updates a variable value or atomically renames it", async () => {
+    await ctx.api.put("/api/v1/variables/user/token").send({ value: "first" }).expect(200);
+
+    const updated = await ctx.api.patch("/api/v1/variables/user/token").send({ value: "second" }).expect(200);
+    expect(updated.body).toMatchObject({ scope: "user", key: "token", value: "second" });
+
+    const renamed = await ctx.api.patch("/api/v1/variables/user/token").send({ key: "authToken" }).expect(200);
+    expect(renamed.body).toMatchObject({ scope: "user", key: "authToken", value: "second" });
+    expect((await ctx.api.get("/api/v1/variables").expect(200)).body.variables).toEqual([
+      expect.objectContaining({ scope: "user", key: "authToken", value: "second" }),
+    ]);
+  });
+
+  it("does not overwrite an existing variable when a rename conflicts", async () => {
+    await ctx.api.put("/api/v1/variables/global/old").send({ value: "old value" }).expect(200);
+    await ctx.api.put("/api/v1/variables/global/taken").send({ value: "keep me" }).expect(200);
+
+    const conflict = await ctx.api.patch("/api/v1/variables/global/old").send({ key: "taken" }).expect(409);
+    expect(conflict.body.error).toMatchObject({
+      code: "VARIABLE_KEY_EXISTS",
+      message: 'A global variable named "taken" already exists',
+    });
+    expect((await ctx.api.get("/api/v1/variables").expect(200)).body.variables).toEqual([
+      expect.objectContaining({ scope: "global", key: "old", value: "old value" }),
+      expect.objectContaining({ scope: "global", key: "taken", value: "keep me" }),
+    ]);
+  });
+
+  it("rejects an empty patch and reports missing variables", async () => {
+    await ctx.api.patch("/api/v1/variables/user/missing").send({}).expect(400);
+    await ctx.api.patch("/api/v1/variables/user/missing").send({ value: "x" }).expect(404);
+  });
+
   it("will not let one person delete another's user-scope value", async () => {
     const other = await signInAs(ctx, "victim@sisal.com");
     await other.put("/api/v1/variables/user/token").send({ value: "theirs" }).expect(200);
 
     await ctx.api.delete("/api/v1/variables/user/token").expect(404);
+    await ctx.api.patch("/api/v1/variables/user/token").send({ key: "renamed" }).expect(404);
 
     const theirs = await other.get("/api/v1/variables").expect(200);
     expect(theirs.body.variables).toEqual([expect.objectContaining({ value: "theirs" })]);
@@ -152,11 +212,20 @@ describe("scoped variables", () => {
     });
     try {
       await ctx.api.put("/api/v1/variables/user/private").send({ value: "x" }).expect(200);
+      await ctx.api.post("/api/v1/variables/user").send({ key: "private-add", value: "x" }).expect(201);
+      await ctx.api.post("/api/v1/variables/global").send({ key: "global-add", value: "x" }).expect(201);
       await ctx.api.put("/api/v1/variables/global/shared").send({ value: "x" }).expect(200);
-      await ctx.api.delete("/api/v1/variables/global/shared").expect(204);
+      await ctx.api.patch("/api/v1/variables/global/shared").send({ key: "renamed" }).expect(200);
+      await ctx.api.delete("/api/v1/variables/global/renamed").expect(204);
       // A personal value concerns one person: broadcasting it would make every other client
       // refetch for nothing and would tell the team which keys that person holds.
-      expect(seen).toEqual(["updated:shared", "trashed:shared"]);
+      expect(seen).toEqual([
+        "created:global-add",
+        "updated:shared",
+        "trashed:shared",
+        "updated:renamed",
+        "trashed:renamed",
+      ]);
     } finally {
       unsubscribe();
     }

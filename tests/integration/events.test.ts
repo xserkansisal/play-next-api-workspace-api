@@ -87,6 +87,8 @@ describe("GET /api/v1/events", () => {
 
     const env = (await ctx.api.post("/api/v1/environments").send({ name: "E" }).expect(201)).body;
     expected.push({ kind: "environment", id: env.id, collectionId: null, operation: "created", changedAt: env.updatedAt });
+    const envWithVariable = (await ctx.api.post(`/api/v1/environments/${env.id}/variables`).send({ key: "added", value: "value" }).expect(201)).body;
+    expected.push({ kind: "environment", id: env.id, collectionId: null, operation: "updated", changedAt: envWithVariable.updatedAt });
     const envSaved = (await ctx.api.put(`/api/v1/environments/${env.id}`).send({ name: "E2" }).expect(200)).body;
     expected.push({ kind: "environment", id: env.id, collectionId: null, operation: "updated", changedAt: envSaved.updatedAt });
     await ctx.api.delete(`/api/v1/environments/${env.id}`).expect(204);

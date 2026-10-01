@@ -37,12 +37,17 @@ export function createErrorHandler(options: ErrorHandlerOptions = {}): ErrorRequ
     } else if (err instanceof ZodError) {
       status = 400;
       body = { error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: err.issues } };
+    } else if (isBodyParserError(err)) {
+      status = err.status;
+      body = {
+        error: {
+          code: err.status === 413 ? "PAYLOAD_TOO_LARGE" : "BAD_REQUEST",
+          message: err.status === 413 ? "Request body is too large" : err.expose ? err.message : "Bad request",
+        },
+      };
     } else if (isUniqueViolation(err)) {
       status = 409;
       body = { error: { code: "CONFLICT", message: "The change conflicts with existing data" } };
-    } else if (isBodyParserError(err)) {
-      status = err.status;
-      body = { error: { code: "BAD_REQUEST", message: err.expose ? err.message : "Bad request" } };
     } else {
       logger(err);
       body = {

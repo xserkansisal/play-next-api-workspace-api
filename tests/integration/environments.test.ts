@@ -97,6 +97,33 @@ describe("environments API", () => {
     await ctx.api.post("/api/v1/environments").send({ name: "E5", variables: [{ key: "a}", value: "1" }] }).expect(400);
   });
 
+  it("adds environment variables atomically, appending rows and allowing disabled duplicate keys", async () => {
+    const env = await ctx.api.post("/api/v1/environments").send({
+      name: "Append",
+      variables: [{ key: "token", value: "old", enabled: false }],
+    }).expect(201);
+
+    const added = await ctx.api.post(`/api/v1/environments/${env.body.id}/variables`)
+      .send({ key: "token", value: "new" })
+      .expect(201);
+    expect(added.body.variables).toEqual([
+      { key: "token", value: "old", enabled: false },
+      { key: "token", value: "new", enabled: true },
+    ]);
+
+    await ctx.api.post(`/api/v1/environments/${env.body.id}/variables`)
+      .send({ key: "token", value: "duplicate" })
+      .expect(409)
+      .expect(({ body }) => expect(body.error.code).toBe("VARIABLE_KEY_EXISTS"));
+    await ctx.api.post(`/api/v1/environments/${env.body.id}/variables`)
+      .send({ key: "token", value: "disabled duplicate", enabled: false })
+      .expect(201);
+
+    await ctx.api.post(`/api/v1/environments/00000000-0000-4000-8000-000000000000/variables`)
+      .send({ key: "missing", value: "x" })
+      .expect(404);
+  });
+
   it("moves an environment to Trash", async () => {
     const env = await ctx.api.post("/api/v1/environments").send({ name: "Gone" }).expect(201);
     await ctx.api.delete(`/api/v1/environments/${env.body.id}`).expect(204);

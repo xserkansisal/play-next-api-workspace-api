@@ -5,6 +5,7 @@ import {
   environmentInputSchema,
   restoreSchema,
   variableDisplayOrderSchema,
+  variableOrderPreferencesSchema,
 } from "../../src/validation/schemas.js";
 import { compareByName, nameKey } from "../../src/services/common.js";
 
@@ -54,6 +55,49 @@ describe("validation schemas", () => {
     expect(variableDisplayOrderSchema.safeParse({ order: ["two words"] }).success).toBe(false);
     expect(variableDisplayOrderSchema.safeParse({ order: ["{invalid}"] }).success).toBe(false);
     expect(variableDisplayOrderSchema.safeParse({ order: ["token"], extra: true }).success).toBe(false);
+  });
+
+  it("validates variable-order preferences while preserving extension fields", () => {
+    const document = {
+      version: 1,
+      sort: { field: "value", direction: "desc", futureSortOption: true },
+      manual: {
+        user: ["token"],
+        global: ["tenant"],
+        environments: { "environment-id": ["host"] },
+        futureGroup: ["later"],
+      },
+      updatedAt: "2026-10-01T11:20:00.000Z",
+      futureDocumentField: { enabled: true },
+    };
+    expect(variableOrderPreferencesSchema.parse(document)).toEqual(document);
+    expect(
+      variableOrderPreferencesSchema.safeParse({
+        ...document,
+        sort: { field: "environment", direction: "desc" },
+      }).success,
+    ).toBe(false);
+    expect(
+      variableOrderPreferencesSchema.safeParse({
+        ...document,
+        manual: { ...document.manual, user: ["x".repeat(257)] },
+      }).success,
+    ).toBe(false);
+    expect(
+      variableOrderPreferencesSchema.safeParse({
+        ...document,
+        manual: { ...document.manual, global: Array.from({ length: 1001 }, () => "key") },
+      }).success,
+    ).toBe(false);
+    expect(
+      variableOrderPreferencesSchema.safeParse({
+        ...document,
+        manual: {
+          ...document.manual,
+          environments: Object.fromEntries(Array.from({ length: 201 }, (_, index) => [`env-${index}`, []])),
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("defaults restore input when omitted", () => {

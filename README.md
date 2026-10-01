@@ -105,7 +105,12 @@ Scoped variables retain one key per user and one global value per key.
 | GET | `/api/v1/variables/order` | Read this user's saved display order of variable names |
 | PUT | `/api/v1/variables/order` | Replace this user's display order. Body: `{ "order": string[] }` |
 | PUT | `/api/v1/variables/:scope/:key` | Save a value at `user` or `global` scope. Body: `{ "value": string }` |
+| PATCH | `/api/v1/variables/:scope/:key` | Update a value and/or atomically rename a variable. Body: `{ "key"?: string, "value"?: string }` |
+| POST | `/api/v1/variables/:scope` | Create-only scoped variable. Body: `{ "key": string, "value": string }`; duplicate keys return `409` |
 | DELETE | `/api/v1/variables/:scope/:key` | Forget one variable at that scope |
+| POST | `/api/v1/environments/:id/variables` | Append one variable row to an environment; enabled-key conflicts return `409` |
+| GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
+| PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |

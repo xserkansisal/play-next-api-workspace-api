@@ -1,9 +1,9 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { first } from "../db/query.js";
 import { environments, environmentVariables } from "../db/schema.js";
-import { ConflictError, NotFoundError } from "../errors.js";
-import type { EnvironmentInput } from "../validation/schemas.js";
+import { ConflictError, HttpError, NotFoundError } from "../errors.js";
+import type { EnvironmentInput, EnvironmentVariableCreateInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
 import { copyNameAsync } from "./copyName.js";
 import type { DbExecutor } from "./tree.js";
@@ -12,6 +12,13 @@ export interface EnvironmentVariable {
   key: string;
   value: string;
   enabled: boolean;
+}
+
+function isDuplicateEntry(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { code?: unknown; cause?: unknown };
+  return candidate.code === "ER_DUP_ENTRY" ||
+    (candidate.cause !== undefined && candidate.cause !== error && isDuplicateEntry(candidate.cause));
 }
 
 export interface Environment {
@@ -63,6 +70,51 @@ async function requireActive(db: DbExecutor, id: string): Promise<EnvironmentRow
   const row = await findActive(db, id);
   if (!row) throw new NotFoundError(`Environment ${id} not found`);
   return row;
+}
+
+export async function addEnvironmentVariable(
+  db: AppDatabase,
+  id: string,
+  input: EnvironmentVariableCreateInput,
+  actorId: string,
+): Promise<Environment> {
+  try {
+    return await db.transaction(async (tx) => {
+      const [environment] = await tx.select({ id: environments.id })
+        .from(environments)
+        .where(and(eq(environments.id, id), isNull(environments.deletedAt)))
+        .limit(1)
+        .for("update");
+      if (!environment) throw new NotFoundError(`Environment ${id} not found`);
+
+      const [rowCount] = await tx.select({ value: count() })
+        .from(environmentVariables)
+        .where(eq(environmentVariables.environmentId, id));
+      if (Number(rowCount?.value ?? 0) >= 1000) {
+        throw new HttpError(422, "The environment variable limit of 1000 has been reached", "VARIABLE_LIMIT_REACHED");
+      }
+
+      const [lastVariable] = await tx.select({ position: environmentVariables.position })
+        .from(environmentVariables)
+        .where(eq(environmentVariables.environmentId, id))
+        .orderBy(desc(environmentVariables.position))
+        .limit(1);
+
+      await tx.insert(environmentVariables).values({
+        environmentId: id,
+        position: (lastVariable?.position ?? -1) + 1,
+        ...input,
+      });
+      const updatedAt = nowIso();
+      await tx.update(environments).set({ updatedAt, updatedBy: actorId }).where(eq(environments.id, id));
+      return readEnvironment(tx, id);
+    });
+  } catch (error) {
+    if (isDuplicateEntry(error)) {
+      throw new ConflictError(`An enabled variable named "${input.key}" already exists in this environment`, "VARIABLE_KEY_EXISTS");
+    }
+    throw error;
+  }
 }
 
 export async function findActiveEnvironmentByName(db: DbExecutor, name: string, excludeId?: string): Promise<EnvironmentRow | undefined> {
