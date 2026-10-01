@@ -23,11 +23,20 @@ export interface CreateAppOptions {
   logger?: ErrorHandlerOptions["logger"];
 }
 
+// SMTP is chosen by whether it is configured, not by NODE_ENV. Tying it to production meant
+// settings could not be exercised until the one deployment where a mistake is most expensive, and
+// production already refuses to start without a host and a sender. Configuring SMTP in development
+// also withdraws the dev-inbox helper, which only ever reads the in-memory sender - so turning real
+// delivery on cannot leave a code-revealing route behind.
+export function defaultEmailCodeSender(env: Env): EmailCodeSender {
+  return env.SMTP_HOST && env.SMTP_FROM ? new SmtpEmailCodeSender(env) : new MemoryEmailCodeSender();
+}
+
 export function createApp({
   env,
   db,
   events = new ChangeEventHub(),
-  emailCodeSender = env.NODE_ENV === "production" ? new SmtpEmailCodeSender(env) : new MemoryEmailCodeSender(),
+  emailCodeSender = defaultEmailCodeSender(env),
   logger,
 }: CreateAppOptions): Express {
   const app = express();
@@ -37,7 +46,7 @@ export function createApp({
 
   app.use("/health", createHealthRouter());
   app.use(express.json({ limit: "50mb" }));
-  app.use("/api/v1/auth", createAuthRouter(db, env, emailCodeSender));
+  app.use("/api/v1/auth", createAuthRouter(db, env, emailCodeSender, logger));
   const requireAuth = createAuthenticationMiddleware(db, env.AUTH_COOKIE_NAME);
   app.use(
     "/api/v1/events",

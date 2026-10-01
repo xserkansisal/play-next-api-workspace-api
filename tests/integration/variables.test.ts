@@ -24,6 +24,46 @@ describe("scoped variables", () => {
 
   it("requires a signed-in user", async () => {
     await ctx.unauthenticatedApi.get("/api/v1/variables").expect(401);
+    await ctx.unauthenticatedApi.get("/api/v1/variables/order").expect(401);
+    await ctx.unauthenticatedApi.put("/api/v1/variables/order").send({ order: [] }).expect(401);
+  });
+
+  it("persists a complete display order privately, including names with no API variable row", async () => {
+    const other = await signInAs(ctx, "order-private@sisal.com");
+    await ctx.api.put("/api/v1/variables/user/token").send({ value: "unchanged" }).expect(200);
+
+    expect((await ctx.api.get("/api/v1/variables/order").expect(200)).body).toEqual({ order: [] });
+    const saved = await ctx.api
+      .put("/api/v1/variables/order")
+      .send({ order: ["environmentOnly", "token", "globalOnly"] })
+      .expect(200);
+    expect(saved.body).toEqual({ order: ["environmentOnly", "token", "globalOnly"] });
+    expect((await ctx.api.get("/api/v1/variables/order").expect(200)).body).toEqual(saved.body);
+    expect((await other.get("/api/v1/variables/order").expect(200)).body).toEqual({ order: [] });
+
+    await ctx.api.put("/api/v1/variables/order").send({ order: [] }).expect(200);
+    expect((await ctx.api.get("/api/v1/variables/order").expect(200)).body).toEqual({ order: [] });
+    expect((await ctx.api.get("/api/v1/variables").expect(200)).body.variables).toEqual([
+      expect.objectContaining({ scope: "user", key: "token", value: "unchanged" }),
+    ]);
+  });
+
+  it("rejects duplicate names, invalid variable keys, and malformed order bodies", async () => {
+    const invalidBodies = [
+      { order: ["token", "token"] },
+      { order: ["two words"] },
+      { order: ["{braced}"] },
+      { order: [""] },
+      { order: "token" },
+      { order: ["token"], extra: true },
+      {},
+    ];
+
+    for (const body of invalidBodies) {
+      const response = await ctx.api.put("/api/v1/variables/order").send(body).expect(400);
+      expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect((await ctx.api.get("/api/v1/variables/order").expect(200)).body).toEqual({ order: [] });
   });
 
   it("starts empty and returns what was written", async () => {

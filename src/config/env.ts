@@ -9,11 +9,34 @@ const booleanEnv = (defaultValue: boolean) =>
 const optionalStringEnv = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
 
-const envSchema = z.object({
+// Every pepper this repository has ever printed as an example. A secret that appears in a public
+// git history is known to everyone who can read the repository, which defeats the entire point of
+// peppering: the value is what stops a stolen database from being brute-forced. Copying the
+// deployment guide's export block verbatim used to produce exactly that, and passed validation.
+// Anything added here must stay here even after the docs stop printing it, because an operator who
+// copied it once is still running it.
+const PUBLISHED_PEPPERS = new Set([
+  "local-development-only-pepper-not-for-production",
+  "replace-with-a-random-secret-at-least-32-characters",
+  "use-a-unique-random-secret-of-at-least-32-characters",
+]);
+
+// A typed-out placeholder reaches 32 characters by repetition; a generated secret does not. This
+// only rejects the obviously hand-written case - real random output of this length has roughly
+// twenty distinct characters, so the threshold is nowhere near it and does not guess at entropy.
+const MIN_PEPPER_DISTINCT_CHARACTERS = 5;
+
+const distinctCharacters = (value: string) => new Set(value).size;
+
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
-  DATABASE_PATH: z.string().min(1).default("./data/api.sqlite"),
+  MYSQL_HOST: z.string().min(1).default("127.0.0.1"),
+  MYSQL_PORT: z.coerce.number().int().min(1).max(65535).default(3306),
+  MYSQL_USER: z.string().min(1).default("play_next_api"),
+  MYSQL_PASSWORD: optionalStringEnv(z.string().min(1)),
+  MYSQL_DATABASE: z.string().regex(/^[A-Za-z0-9_]+$/).default("play_next_api"),
   // A bare "*" means every origin; anything else must be a single origin. The two are validated
   // together so a mistyped wildcard is rejected rather than silently treated as one.
   CORS_ORIGIN: z
@@ -49,13 +72,29 @@ const envSchema = z.object({
   PROXY_ALLOWED_HOSTS: optionalStringEnv(z.string().min(1)),
   PROXY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000),
   PROXY_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),
-}).superRefine((env, ctx) => {
+});
+
+const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV === "production") {
-    if (
-      env.AUTH_CODE_PEPPER === "local-development-only-pepper-not-for-production" ||
-      env.AUTH_CODE_PEPPER === "replace-with-a-random-secret-at-least-32-characters"
-    ) {
-      ctx.addIssue({ code: "custom", path: ["AUTH_CODE_PEPPER"], message: "must be replaced with a unique secret in production" });
+    if (!env.MYSQL_PASSWORD) {
+      ctx.addIssue({ code: "custom", path: ["MYSQL_PASSWORD"], message: "is required in production" });
+    }
+    if (PUBLISHED_PEPPERS.has(env.AUTH_CODE_PEPPER)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUTH_CODE_PEPPER"],
+        message:
+          "is a value published in this repository, so it is not a secret. " +
+          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+      });
+    } else if (distinctCharacters(env.AUTH_CODE_PEPPER) < MIN_PEPPER_DISTINCT_CHARACTERS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUTH_CODE_PEPPER"],
+        message:
+          "repeats too few distinct characters to be randomly generated; length alone is not secrecy. " +
+          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+      });
     }
     if (!env.SMTP_HOST) {
       ctx.addIssue({ code: "custom", path: ["SMTP_HOST"], message: "is required in production" });
@@ -70,6 +109,11 @@ const envSchema = z.object({
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+// Every variable this API reads. Exported so deployment wrappers can be checked against it: a
+// setting the operator exports but the wrapper forgets to forward is invisible at startup, and the
+// API simply runs on the default. That is how PM2 silently disabled the server-side proxy.
+export const ENV_KEYS = Object.keys(baseEnvSchema.shape) as (keyof Env)[];
 
 export class EnvValidationError extends Error {
   constructor(public readonly issues: string[]) {

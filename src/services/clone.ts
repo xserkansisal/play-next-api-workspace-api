@@ -26,7 +26,7 @@ import {
   type CollectionAggregate,
 } from "./collections.js";
 import { nameKey, newId, nowIso } from "./common.js";
-import { copyName } from "./copyName.js";
+import { copyNameAsync } from "./copyName.js";
 import { readItem } from "./items.js";
 import { activeSubtreeIds, findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
 
@@ -77,14 +77,14 @@ function parentFirst(rows: ItemRow[]): ItemRow[] {
  * Writes `rows` into `targetCollectionId` with fresh ids, each row pointing at the copy of its
  * old parent. Returns the id map so the caller can find the new root.
  */
-function copySubtree(
+async function copySubtree(
   db: DbExecutor,
   rows: ItemRow[],
   targetCollectionId: string,
   plan: CopyPlan,
   timestamp: string,
   actorId: string,
-): Map<string, string> {
+): Promise<Map<string, string>> {
   // Built before any insert so a child can be written in the same pass as its parent, whatever
   // order the rows came back in.
   const newIds = new Map(rows.map((row) => [row.id, newId()]));
@@ -92,7 +92,7 @@ function copySubtree(
   for (const row of parentFirst(rows)) {
     const isRoot = row.id === plan.rootId;
     const name = isRoot && plan.rootName !== null ? plan.rootName : row.name;
-    db.insert(items)
+    await db.insert(items)
       .values({
         id: newIds.get(row.id)!,
         collectionId: targetCollectionId,
@@ -109,30 +109,24 @@ function copySubtree(
         // would credit them with a row they never wrote.
         createdBy: actorId,
         updatedBy: actorId,
-      })
-      .run();
+      });
   }
 
   const requestIds = rows.filter((row) => row.kind === "request").map((row) => row.id);
   for (const group of chunk(requestIds)) {
-    for (const detail of db.select().from(requestDetails).where(inArray(requestDetails.itemId, group)).all()) {
-      db.insert(requestDetails)
-        .values({ ...detail, itemId: newIds.get(detail.itemId)! })
-        .run();
+    for (const detail of await db.select().from(requestDetails).where(inArray(requestDetails.itemId, group))) {
+      await db.insert(requestDetails).values({ ...detail, itemId: newIds.get(detail.itemId)! });
     }
     // Position is carried over rather than re-derived, so headers and params keep the order the
     // user put them in.
     for (const table of [requestQueryParams, requestHeaders] as const) {
-      const kvRows = db
+      const kvRows = await db
         .select()
         .from(table)
         .where(inArray(table.requestId, group))
-        .orderBy(asc(table.requestId), asc(table.position))
-        .all();
+        .orderBy(asc(table.requestId), asc(table.position));
       if (kvRows.length > 0) {
-        db.insert(table)
-          .values(kvRows.map((row) => ({ ...row, requestId: newIds.get(row.requestId)! })))
-          .run();
+        await db.insert(table).values(kvRows.map((row) => ({ ...row, requestId: newIds.get(row.requestId)! })));
       }
     }
   }
@@ -141,46 +135,39 @@ function copySubtree(
 }
 
 /** Duplicates a collection and its whole active item tree under a free name. */
-export function cloneCollection(db: AppDatabase, id: string, actorId: string): CollectionAggregate {
-  return db.transaction(
-    (tx) => {
-      const source = requireActiveCollection(tx, id);
-      const name = copyName(source.name, (candidate) => findActiveCollectionByName(tx, candidate) !== undefined);
+export function cloneCollection(db: AppDatabase, id: string, actorId: string): Promise<CollectionAggregate> {
+  return db.transaction(async (tx) => {
+    const source = await requireActiveCollection(tx, id);
+    const name = await copyNameAsync(
+      source.name,
+      async (candidate) => (await findActiveCollectionByName(tx, candidate)) !== undefined,
+    );
 
-      const newCollectionId = newId();
-      const timestamp = nowIso();
-      tx.insert(collections)
-        .values({
-          id: newCollectionId,
-          name,
-          nameKey: nameKey(name),
-          description: source.description,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          createdBy: actorId,
-          updatedBy: actorId,
-        })
-        .run();
+    const newCollectionId = newId();
+    const timestamp = nowIso();
+    await tx.insert(collections).values({
+      id: newCollectionId,
+      name,
+      nameKey: nameKey(name),
+      description: source.description,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      createdBy: actorId,
+      updatedBy: actorId,
+    });
 
-      const rows = tx
-        .select()
-        .from(items)
-        .where(and(eq(items.collectionId, id), isNull(items.deletedAt)))
-        .all();
-      // Nothing is re-rooted or renamed here: every row keeps its own parent within the new
-      // collection, and the collection's new name is the only one that had to be free.
-      copySubtree(tx, rows, newCollectionId, { rootId: null, rootParentId: null, rootName: null }, timestamp, actorId);
+    const rows = await tx.select().from(items).where(and(eq(items.collectionId, id), isNull(items.deletedAt)));
+    // Nothing is re-rooted or renamed here: every row keeps its own parent within the new
+    // collection, and the collection's new name is the only one that had to be free.
+    await copySubtree(tx, rows, newCollectionId, { rootId: null, rootParentId: null, rootName: null }, timestamp, actorId);
 
-      return readCollection(tx, newCollectionId);
-    },
-    { behavior: "immediate" },
-  );
+    return readCollection(tx, newCollectionId);
+  });
 }
 
 /** True when an active item of any kind with this name already sits under the same parent. */
-function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: string | null, name: string): boolean {
-  return (
-    db
+async function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: string | null, name: string): Promise<boolean> {
+  const rows = await db
       .select({ id: items.id })
       .from(items)
       .where(
@@ -191,8 +178,8 @@ function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: string
           isNull(items.deletedAt),
         ),
       )
-      .get() !== undefined
-  );
+      .limit(1);
+  return rows.length > 0;
 }
 
 /**
@@ -201,38 +188,34 @@ function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: string
  * The copy keeps the source's parent so it appears beside what it was copied from - dropping it
  * at the collection root instead would make a copy taken from four levels down hard to find.
  */
-export function cloneItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): ItemNode {
-  return db.transaction(
-    (tx) => {
-      requireActiveCollection(tx, collectionId);
-      const source = findActiveItem(tx, collectionId, itemId);
-      if (!source) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
+export function cloneItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): Promise<ItemNode> {
+  return db.transaction(async (tx) => {
+    await requireActiveCollection(tx, collectionId);
+    const source = await findActiveItem(tx, collectionId, itemId);
+    if (!source) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
 
-      // A folder only has to clear other folders, since that is all the index constrains. A
-      // request is under no constraint at all, yet it is numbered against every sibling name:
-      // two identical rows in the tree would leave the user unable to tell the copy from the
-      // original, which defeats the point of making one.
-      const name = copyName(source.name, (candidate) =>
-        source.kind === "folder"
-          ? findActiveSiblingFolder(tx, collectionId, source.parentId, candidate) !== undefined
-          : siblingNameTaken(tx, collectionId, source.parentId, candidate),
-      );
+    // A folder only has to clear other folders, since that is all the index constrains. Requests
+    // are numbered too so the copy remains distinguishable in the tree.
+    const name = await copyNameAsync(source.name, async (candidate) =>
+      source.kind === "folder"
+        ? (await findActiveSiblingFolder(tx, collectionId, source.parentId, candidate)) !== undefined
+        : siblingNameTaken(tx, collectionId, source.parentId, candidate),
+    );
 
-      const rows = chunk(activeSubtreeIds(tx, itemId)).flatMap((group) =>
-        tx.select().from(items).where(inArray(items.id, group)).all(),
-      );
+    const subtreeIds = await activeSubtreeIds(tx, itemId);
+    const rows = (
+      await Promise.all(chunk(subtreeIds).map((group) => tx.select().from(items).where(inArray(items.id, group))))
+    ).flat();
 
-      const timestamp = nowIso();
-      const newIds = copySubtree(
-        tx,
-        rows,
-        collectionId,
-        { rootId: itemId, rootParentId: source.parentId, rootName: name },
-        timestamp,
-        actorId,
-      );
-      return readItem(tx, collectionId, newIds.get(itemId)!);
-    },
-    { behavior: "immediate" },
-  );
+    const timestamp = nowIso();
+    const newIds = await copySubtree(
+      tx,
+      rows,
+      collectionId,
+      { rootId: itemId, rootParentId: source.parentId, rootName: name },
+      timestamp,
+      actorId,
+    );
+    return readItem(tx, collectionId, newIds.get(itemId)!);
+  });
 }

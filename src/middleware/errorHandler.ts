@@ -37,7 +37,7 @@ export function createErrorHandler(options: ErrorHandlerOptions = {}): ErrorRequ
     } else if (err instanceof ZodError) {
       status = 400;
       body = { error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: err.issues } };
-    } else if (isSqliteUniqueViolation(err)) {
+    } else if (isUniqueViolation(err)) {
       status = 409;
       body = { error: { code: "CONFLICT", message: "The change conflicts with existing data" } };
     } else if (isBodyParserError(err)) {
@@ -69,12 +69,13 @@ function isBodyParserError(err: unknown): err is { status: number; expose?: bool
   );
 }
 
-function isSqliteUniqueViolation(err: unknown): boolean {
+function isUniqueViolation(err: unknown): boolean {
   const code = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
   const cause = typeof err === "object" && err !== null ? (err as { cause?: unknown }).cause : undefined;
   return (
     code === "SQLITE_CONSTRAINT_UNIQUE" ||
     code === "SQLITE_CONSTRAINT_PRIMARYKEY" ||
-    (cause !== undefined && cause !== err && isSqliteUniqueViolation(cause))
+    code === "ER_DUP_ENTRY" ||
+    (cause !== undefined && cause !== err && isUniqueViolation(cause))
   );
 }

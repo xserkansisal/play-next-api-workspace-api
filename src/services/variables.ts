@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { variables } from "../db/schema.js";
+import { variableDisplayOrders, variables } from "../db/schema.js";
 import { NotFoundError } from "../errors.js";
 import { newId, nowIso } from "./common.js";
 
@@ -55,25 +55,37 @@ function matches(scope: VariableScope, userId: string, key: string) {
  * Another person's user-scope rows are not merely hidden from the response - they are never
  * selected, so there is no filtering step that a later change could forget.
  */
-export function listVariables(db: AppDatabase, userId: string): ScopedVariable[] {
-  const rows = db
-    .select()
-    .from(variables)
-    .where(
-      and(
-        eq(variables.scope, "user"),
-        eq(variables.userId, userId),
-      ),
-    )
-    .orderBy(asc(variables.key))
-    .all();
-  const globals = db
-    .select()
-    .from(variables)
-    .where(eq(variables.scope, "global"))
-    .orderBy(asc(variables.key))
-    .all();
+export async function listVariables(db: AppDatabase, userId: string): Promise<ScopedVariable[]> {
+  const [rows, globals] = await Promise.all([
+    db
+      .select()
+      .from(variables)
+      .where(and(eq(variables.scope, "user"), eq(variables.userId, userId)))
+      .orderBy(asc(variables.key)),
+    db.select().from(variables).where(eq(variables.scope, "global")).orderBy(asc(variables.key)),
+  ]);
   return [...rows, ...globals].map(toScopedVariable);
+}
+
+export async function getVariableDisplayOrder(db: AppDatabase, userId: string): Promise<string[]> {
+  const [preference] = await db
+    .select({ order: variableDisplayOrders.order })
+    .from(variableDisplayOrders)
+    .where(eq(variableDisplayOrders.userId, userId))
+    .limit(1);
+  return preference?.order ?? [];
+}
+
+export async function setVariableDisplayOrder(
+  db: AppDatabase,
+  userId: string,
+  order: string[],
+): Promise<string[]> {
+  await db
+    .insert(variableDisplayOrders)
+    .values({ userId, order })
+    .onDuplicateKeyUpdate({ set: { order } });
+  return order;
 }
 
 /**
@@ -88,20 +100,9 @@ export function setVariable(
   scope: VariableScope,
   key: string,
   value: string,
-): ScopedVariable {
+): Promise<ScopedVariable> {
   const now = nowIso();
-  const existing = db.select().from(variables).where(matches(scope, userId, key)).get();
-  if (existing) {
-    const updated = db
-      .update(variables)
-      .set({ value, updatedAt: now, updatedBy: userId })
-      .where(eq(variables.id, existing.id))
-      .returning()
-      .get();
-    return toScopedVariable(updated);
-  }
-  const inserted = db
-    .insert(variables)
+  return db.insert(variables)
     .values({
       id: newId(),
       scope,
@@ -112,13 +113,12 @@ export function setVariable(
       updatedAt: now,
       updatedBy: userId,
     })
-    .returning()
-    .get();
-  return toScopedVariable(inserted);
+    .onDuplicateKeyUpdate({ set: { value, updatedAt: now, updatedBy: userId } })
+    .then(() => ({ scope, key, value, updatedAt: now, updatedBy: userId }));
 }
 
-export function deleteVariable(db: AppDatabase, userId: string, scope: VariableScope, key: string): void {
-  const existing = db.select().from(variables).where(matches(scope, userId, key)).get();
+export async function deleteVariable(db: AppDatabase, userId: string, scope: VariableScope, key: string): Promise<void> {
+  const [existing] = await db.select().from(variables).where(matches(scope, userId, key)).limit(1);
   if (!existing) throw new NotFoundError(`No ${scope} variable named "${key}"`);
-  db.delete(variables).where(eq(variables.id, existing.id)).run();
+  await db.delete(variables).where(eq(variables.id, existing.id));
 }

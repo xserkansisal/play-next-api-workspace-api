@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestContext, requestFields, type TestContext } from "../helpers.js";
+import { createTestContext, queryRows, requestFields, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
 beforeEach(async () => {
@@ -72,7 +72,8 @@ describe("collections API", () => {
 
     expect(response.body.items).toHaveLength(6);
     expect(response.body.items.every((item: { body: { content: string } }) => item.body.content.length === content.length)).toBe(true);
-    expect(ctx.db.$client.prepare("SELECT count(*) AS count FROM collections").get()).toEqual({ count: 1 });
+    const [countRows] = await ctx.db.$client.query("SELECT count(*) AS count FROM collections");
+    expect(Number((countRows as Array<{ count: number }>)[0]?.count)).toBe(1);
   });
 
   it("rejects case-insensitive duplicate active collection names but allows reuse after Trash", async () => {
@@ -90,6 +91,18 @@ describe("collections API", () => {
     await ctx.api.post("/api/v1/collections").send({ name: "orders" }).expect(201);
   });
 
+  it("keeps Unicode name folding exact without truncating expanded keys", async () => {
+    await ctx.api.post("/api/v1/collections").send({ name: "Éclair" }).expect(201);
+    await ctx.api.post("/api/v1/collections").send({ name: "e\u0301CLAIR" }).expect(409);
+
+    const longFoldedName = "İ".repeat(200);
+    const created = await ctx.api.post("/api/v1/collections").send({ name: longFoldedName }).expect(201);
+    const [stored] = await queryRows(ctx.db, "SELECT CHAR_LENGTH(name_key) AS key_length FROM collections WHERE id = ?", [
+      created.body.id,
+    ]);
+    expect(Number(stored!.key_length)).toBe(400);
+  });
+
   it("rejects the whole create atomically when a nested folder name conflicts", async () => {
     const res = await ctx.api
       .post("/api/v1/collections")
@@ -104,8 +117,9 @@ describe("collections API", () => {
 
     const list = await ctx.api.get("/api/v1/collections").expect(200);
     expect(list.body.collections).toEqual([]);
-    const counts = ctx.db.$client.prepare("SELECT (SELECT count(*) FROM items) AS items, (SELECT count(*) FROM collections) AS collections").get();
-    expect(counts).toEqual({ items: 0, collections: 0 });
+    const [countRows] = await ctx.db.$client.query("SELECT (SELECT count(*) FROM items) AS items, (SELECT count(*) FROM collections) AS collections");
+    const counts = (countRows as Array<{ items: number; collections: number }>)[0]!;
+    expect({ items: Number(counts.items), collections: Number(counts.collections) }).toEqual({ items: 0, collections: 0 });
   });
 
   it("allows duplicate request names in the same parent", async () => {

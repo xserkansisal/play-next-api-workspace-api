@@ -29,9 +29,9 @@ export function readCookie(req: Request, name: string): string | undefined {
 }
 
 export function createAuthenticationMiddleware(db: AppDatabase, cookieName: Env["AUTH_COOKIE_NAME"]): RequestHandler {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const token = readCookie(req, cookieName);
-    const user = token ? findSessionUser(db, token) : undefined;
+    const user = token ? await findSessionUser(db, token) : undefined;
     if (!user) {
       res.status(401).json({ error: { code: "AUTHENTICATION_REQUIRED", message: "Sign-in required" } });
       return;

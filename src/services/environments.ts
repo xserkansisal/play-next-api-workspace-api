@@ -1,10 +1,11 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
+import { first } from "../db/query.js";
 import { environments, environmentVariables } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { EnvironmentInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
-import { copyName } from "./copyName.js";
+import { copyNameAsync } from "./copyName.js";
 import type { DbExecutor } from "./tree.js";
 
 export interface EnvironmentVariable {
@@ -25,53 +26,51 @@ export interface Environment {
 
 type EnvironmentRow = typeof environments.$inferSelect;
 
-function hydrate(db: DbExecutor, rows: EnvironmentRow[]): Environment[] {
+async function hydrate(db: DbExecutor, rows: EnvironmentRow[]): Promise<Environment[]> {
   const variables = new Map<string, EnvironmentVariable[]>();
   const ids = rows.map((r) => r.id);
   for (let i = 0; i < ids.length; i += 500) {
-    const varRows = db
+    const varRows = await db
       .select()
       .from(environmentVariables)
       .where(inArray(environmentVariables.environmentId, ids.slice(i, i + 500)))
-      .orderBy(asc(environmentVariables.environmentId), asc(environmentVariables.position))
-      .all();
+      .orderBy(asc(environmentVariables.environmentId), asc(environmentVariables.position));
     for (const v of varRows) {
       const list = variables.get(v.environmentId) ?? [];
       list.push({ key: v.key, value: v.value, enabled: v.enabled });
       variables.set(v.environmentId, list);
     }
   }
-  return rows.map((row) => ({
+  return Promise.all(rows.map(async (row) => ({
     id: row.id,
     name: row.name,
     variables: variables.get(row.id) ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    ...resolveAttribution(db, row.createdBy, row.updatedBy),
-  }));
+    ...await resolveAttribution(db, row.createdBy, row.updatedBy),
+  })));
 }
 
-function findActive(db: DbExecutor, id: string): EnvironmentRow | undefined {
-  return db
+function findActive(db: DbExecutor, id: string): Promise<EnvironmentRow | undefined> {
+  return first(db
     .select()
     .from(environments)
     .where(and(eq(environments.id, id), isNull(environments.deletedAt)))
-    .get();
+    .limit(1));
 }
 
-function requireActive(db: DbExecutor, id: string): EnvironmentRow {
-  const row = findActive(db, id);
+async function requireActive(db: DbExecutor, id: string): Promise<EnvironmentRow> {
+  const row = await findActive(db, id);
   if (!row) throw new NotFoundError(`Environment ${id} not found`);
   return row;
 }
 
-export function findActiveEnvironmentByName(db: DbExecutor, name: string, excludeId?: string): EnvironmentRow | undefined {
-  return db
+export async function findActiveEnvironmentByName(db: DbExecutor, name: string, excludeId?: string): Promise<EnvironmentRow | undefined> {
+  const rows = await db
     .select()
     .from(environments)
-    .where(and(eq(environments.nameKey, nameKey(name)), isNull(environments.deletedAt)))
-    .all()
-    .find((row) => row.id !== excludeId);
+    .where(and(eq(environments.nameKey, nameKey(name)), isNull(environments.deletedAt)));
+  return rows.find((row) => row.id !== excludeId);
 }
 
 export function environmentNameConflictError(name: string, existingId: string): ConflictError {
@@ -81,34 +80,31 @@ export function environmentNameConflictError(name: string, existingId: string): 
   });
 }
 
-function writeVariables(db: DbExecutor, environmentId: string, variables: EnvironmentInput["variables"]): void {
-  db.delete(environmentVariables).where(eq(environmentVariables.environmentId, environmentId)).run();
+async function writeVariables(db: DbExecutor, environmentId: string, variables: EnvironmentInput["variables"]): Promise<void> {
+  await db.delete(environmentVariables).where(eq(environmentVariables.environmentId, environmentId));
   if (variables.length > 0) {
-    db.insert(environmentVariables)
-      .values(variables.map((v, position) => ({ environmentId, position, ...v })))
-      .run();
+    await db.insert(environmentVariables).values(variables.map((v, position) => ({ environmentId, position, ...v })));
   }
 }
 
-export function listEnvironments(db: AppDatabase): Environment[] {
-  const rows = db.select().from(environments).where(isNull(environments.deletedAt)).all();
-  return hydrate(db, rows).sort(compareByName);
+export async function listEnvironments(db: AppDatabase): Promise<Environment[]> {
+  const rows = await db.select().from(environments).where(isNull(environments.deletedAt));
+  return (await hydrate(db, rows)).sort(compareByName);
 }
 
-export function readEnvironment(db: DbExecutor, id: string): Environment {
-  const [env] = hydrate(db, [requireActive(db, id)]);
+export async function readEnvironment(db: DbExecutor, id: string): Promise<Environment> {
+  const [env] = await hydrate(db, [await requireActive(db, id)]);
   return env!;
 }
 
-export function createEnvironment(db: AppDatabase, input: EnvironmentInput, actorId: string): Environment {
-  return db.transaction(
-    (tx) => {
-      const existing = findActiveEnvironmentByName(tx, input.name);
+export function createEnvironment(db: AppDatabase, input: EnvironmentInput, actorId: string): Promise<Environment> {
+  return db.transaction(async (tx) => {
+      const existing = await findActiveEnvironmentByName(tx, input.name);
       if (existing) throw environmentNameConflictError(input.name, existing.id);
 
       const id = newId();
       const timestamp = nowIso();
-      tx.insert(environments)
+      await tx.insert(environments)
         .values({
           id,
           name: input.name,
@@ -118,31 +114,26 @@ export function createEnvironment(db: AppDatabase, input: EnvironmentInput, acto
           createdBy: actorId,
           updatedBy: actorId,
         })
-        .run();
-      writeVariables(tx, id, input.variables);
+        ;
+      await writeVariables(tx, id, input.variables);
       return readEnvironment(tx, id);
-    },
-    { behavior: "immediate" },
-  );
+    });
 }
 
 /** Explicit save: replaces the environment's name and full variable list (last save wins). */
-export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput, actorId: string): Environment {
-  return db.transaction(
-    (tx) => {
-      requireActive(tx, id);
-      const existing = findActiveEnvironmentByName(tx, input.name, id);
+export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput, actorId: string): Promise<Environment> {
+  return db.transaction(async (tx) => {
+      await requireActive(tx, id);
+      const existing = await findActiveEnvironmentByName(tx, input.name, id);
       if (existing) throw environmentNameConflictError(input.name, existing.id);
 
-      tx.update(environments)
+      await tx.update(environments)
         .set({ name: input.name, nameKey: nameKey(input.name), updatedAt: nowIso(), updatedBy: actorId })
         .where(eq(environments.id, id))
-        .run();
-      writeVariables(tx, id, input.variables);
+        ;
+      await writeVariables(tx, id, input.variables);
       return readEnvironment(tx, id);
-    },
-    { behavior: "immediate" },
-  );
+    });
 }
 
 /**
@@ -151,15 +142,17 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
  * The variables are read back rather than copied row by row, because `writeVariables` is already
  * the one place that decides how a variable list is stored - positions included.
  */
-export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): Environment {
-  return db.transaction(
-    (tx) => {
-      const source = readEnvironment(tx, id);
-      const name = copyName(source.name, (candidate) => findActiveEnvironmentByName(tx, candidate) !== undefined);
+export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): Promise<Environment> {
+  return db.transaction(async (tx) => {
+      const source = await readEnvironment(tx, id);
+      const name = await copyNameAsync(
+        source.name,
+        async (candidate) => (await findActiveEnvironmentByName(tx, candidate)) !== undefined,
+      );
 
       const newEnvironmentId = newId();
       const timestamp = nowIso();
-      tx.insert(environments)
+      await tx.insert(environments)
         .values({
           id: newEnvironmentId,
           name,
@@ -169,21 +162,17 @@ export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): 
           createdBy: actorId,
           updatedBy: actorId,
         })
-        .run();
-      writeVariables(tx, newEnvironmentId, source.variables);
+        ;
+      await writeVariables(tx, newEnvironmentId, source.variables);
       return readEnvironment(tx, newEnvironmentId);
-    },
-    { behavior: "immediate" },
-  );
+    });
 }
 
-export function trashEnvironment(db: AppDatabase, id: string, actorId: string): { id: string; deletedAt: string } {  return db.transaction(
-    (tx) => {
-      requireActive(tx, id);
+export function trashEnvironment(db: AppDatabase, id: string, actorId: string): Promise<{ id: string; deletedAt: string }> {
+  return db.transaction(async (tx) => {
+      await requireActive(tx, id);
       const deletedAt = nowIso();
-      tx.update(environments).set({ deletedAt, updatedAt: deletedAt, updatedBy: actorId }).where(eq(environments.id, id)).run();
+      await tx.update(environments).set({ deletedAt, updatedAt: deletedAt, updatedBy: actorId }).where(eq(environments.id, id));
       return { id, deletedAt };
-    },
-    { behavior: "immediate" },
-  );
+    });
 }

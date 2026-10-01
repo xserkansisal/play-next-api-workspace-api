@@ -24,12 +24,12 @@ npm run dev            # http://localhost:3000/health
 | `npm start`         | Run the compiled server (loads `.env`)         |
 | `npm run typecheck` | Type-check sources and tests                   |
 | `npm test`          | Run Vitest unit + Supertest integration tests  |
-| `npm run db:generate` | Generate a SQL migration from `src/db/schema.ts` into `drizzle/` |
-| `npm run db:migrate`  | Apply pending migrations to `DATABASE_PATH` (the server also applies them on startup) |
+| `npm run db:generate` | Generate a MySQL migration from `src/db/schema.ts` into `drizzle-mysql/` |
+| `npm run db:migrate`  | Apply pending migrations to the configured MySQL database (also applied on startup) |
 | `npm run db:check`    | Check generated migrations for consistency     |
-| `npm run db:check-name-keys` | Read-only report of stale case-folded name keys and Unicode name collisions (exit 1 on collisions) |
+| `npm run mail:check` | Connects and authenticates against the configured SMTP relay without sending anything (exit 1 on failure) |
 
-See [Deployment and operations](docs/deployment.md) for PM2 deployment, migration, and SQLite backup/restore procedures.
+See [Deployment and operations](docs/deployment.md) for MySQL provisioning, PM2 deployment, migrations, and backup/restore.
 
 ## Configuration
 
@@ -40,11 +40,13 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `NODE_ENV` | `development` | `development` \| `test` \| `production` |
 | `HOST`     | `0.0.0.0`     | Bind address; use `127.0.0.1` behind a same-host reverse proxy |
 | `PORT`     | `3000`        | Integer 0–65535                        |
-| `DATABASE_PATH` | `./data/api.sqlite` | SQLite file; parent directory is created if missing |
+| `MYSQL_HOST` / `MYSQL_PORT` | `127.0.0.1` / `3306` | MySQL 8.0.16+ server |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | `play_next_api` / unset | Database credentials; password required in production |
+| `MYSQL_DATABASE` | `play_next_api` | Existing database, created with `utf8mb4_0900_bin` collation |
 | `CORS_ORIGIN` | unset | Optional exact browser origin when accessing the API directly or from Vite; credentialed requests are allowed only from that origin; `*` echoes whatever origin calls, see "Allowing every origin"; not needed for same-origin nginx proxying |
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
-| `AUTH_CODE_PEPPER` | development-only placeholder | HMAC secret, at least 32 characters; must be explicitly set in production |
+| `AUTH_CODE_PEPPER` | development-only placeholder | HMAC key for sign-in codes; a six-digit code is exhaustible from a stolen hash without it. Generate per environment with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Production refuses example and repeated-character values. See [deployment.md](docs/deployment.md#sign-in-code-pepper) |
 | `AUTH_CODE_TTL_SECONDS` | `900` | Sign-in code lifetime (15 minutes by default; range 60–3600) |
 | `AUTH_CODE_MAX_ATTEMPTS` | `5` | Wrong attempts allowed per code before it is invalidated |
 | `AUTH_CODE_REQUEST_LIMIT` / `AUTH_CODE_REQUEST_WINDOW_SECONDS` | `3` / `900` | Code requests allowed per normalized email per window |
@@ -52,8 +54,8 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `AUTH_SESSION_TTL_SECONDS` | `2592000` | Server-side session lifetime (one month by default) |
 | `AUTH_COOKIE_NAME` | `play_next_session` | Session cookie name |
 | `AUTH_COOKIE_SECURE` | `false` | Adds the cookie's `Secure` attribute when enabled; keep false only for the current HTTP-only internal deployment |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; username and password must be set together |
-| `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the loopback-only `/api/v1/auth/dev-inbox` development helper; never set in production |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; setting host and sender switches on real delivery in any mode; username and password must be set together; see "Configuring email delivery" |
+| `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the `/api/v1/auth/dev-inbox` development helper for a directly connected local caller; refused for anything relayed through a proxy; never set in production |
 
 JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
 collection imports. Each individual request body's `content` is still limited to 1,000,000
@@ -62,18 +64,20 @@ per-item limits.
 
 ## Persistence
 
-Shared data is stored in SQLite via [Drizzle ORM](https://orm.drizzle.team/) and the
-[`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) driver (synchronous, so every
-write runs in a single `BEGIN IMMEDIATE` transaction). The schema lives in `src/db/schema.ts`;
-migrations in `drizzle/` are generated with `npm run db:generate` and committed.
+Shared data is stored in MySQL 8.0.16+ via [Drizzle ORM](https://orm.drizzle.team/) and
+`mysql2`. The async pool uses database transactions for multi-row writes. Create the database
+with `utf8mb4_0900_bin` collation so normalized keys and identifiers retain exact comparisons.
+The schema lives in `src/db/schema.ts`; MySQL migrations in `drizzle-mysql/` are generated with
+`npm run db:generate` and committed.
 
 Normalized tables: `collections`, `items` (folders and requests as a recursive tree via
 `parent_id`), `request_details`, ordered `request_query_params` / `request_headers`,
 `environments`, and ordered `environment_variables`. IDs are UUIDs, timestamps are ISO-8601 UTC
 strings, and deletion is a soft delete (`deleted_at`, plus `trash_root_id` on items so a subtree
 is restored together). Sibling order is not persisted; lists are returned alphabetically.
-Partial unique indexes enforce case-insensitive unique active collection names and sibling
-folder names (request names may repeat), and case-insensitive unique active environment names.
+Indexed generated columns preserve the previous partial-unique-index behavior: active collection
+and environment names are unique, as are active sibling folder names (request names may repeat).
+Scoped variables retain one key per user and one global value per key.
 
 ## API (v1)
 
@@ -98,6 +102,8 @@ folder names (request names may repeat), and case-insensitive unique active envi
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
 | GET | `/api/v1/variables` | This user's own variables plus every global one |
+| GET | `/api/v1/variables/order` | Read this user's saved display order of variable names |
+| PUT | `/api/v1/variables/order` | Replace this user's display order. Body: `{ "order": string[] }` |
 | PUT | `/api/v1/variables/:scope/:key` | Save a value at `user` or `global` scope. Body: `{ "value": string }` |
 | DELETE | `/api/v1/variables/:scope/:key` | Forget one variable at that scope |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
@@ -136,6 +142,11 @@ applies: no whitespace, no braces.
 Only a **global** write is announced over SSE. A personal value concerns one person, and
 broadcasting it would make every other client refetch for nothing while telling the whole team
 which keys that person holds.
+
+Display order is an independent per-user preference. Its complete list of names may include
+variables from an environment selected in the client, and does not create, update, or delete
+variable values. Names follow the same key rule (non-empty, at most 200 characters, no whitespace
+or braces), and duplicates are rejected; an empty order is valid.
 
 Values are stored in plain text, exactly as environment variables already are. Nothing here makes
 a secret safer than it is in an environment.
@@ -197,8 +208,55 @@ SMTP host, port, TLS mode, credentials and sender address are configurable; prod
 provided. SMTP delivery has not been verified against the organization's server. Development and
 tests use an in-memory sender that does not send or log mail. For local development only, set a
 long random `AUTH_DEV_INBOX_TOKEN` to expose the latest unexpired code at
-`GET /api/v1/auth/dev-inbox?email=...`, with the token in `X-Dev-Inbox-Token`; the route is
-loopback-only and is not registered in production.
+`GET /api/v1/auth/dev-inbox?email=...`, with the token in `X-Dev-Inbox-Token`; the route is not
+registered in production, and in development it serves only a genuinely local caller. "Local" has
+to be checked twice: a reverse proxy on the same machine makes every caller look local, because
+the address the API sees is nginx's, so a request carrying `X-Forwarded-For`, `X-Real-IP` or
+`Forwarded` is refused regardless of its apparent address. Without that second check, running a
+development-mode API behind nginx would hand sign-in codes for any eligible address to anyone
+holding the token.
+
+### Configuring email delivery
+
+Six settings, of which two decide everything else:
+
+| Setting | What it is | Notes |
+| --- | --- | --- |
+| `SMTP_HOST` | The relay's hostname | Required for real delivery |
+| `SMTP_FROM` | The envelope/header sender | Required for real delivery; must be an address the relay is willing to send as |
+| `SMTP_PORT` | `587` by default | `587` for STARTTLS, `465` for implicit TLS, `25` for an unauthenticated internal relay |
+| `SMTP_SECURE` | `false` by default | `true` only for an implicit-TLS port such as `465`. On `587` this must stay `false` - the connection still upgrades to TLS via STARTTLS |
+| `SMTP_USER` / `SMTP_PASSWORD` | Credentials | Set **both or neither**; the API refuses to start with one of the two. Omit both for a relay that authorizes by source address |
+
+`SMTP_HOST` and `SMTP_FROM` together are the switch: set them and the API sends real mail; leave
+either unset and it uses an in-memory sender that delivers nothing. That is deliberately not tied
+to `NODE_ENV`, so the settings can be exercised in development rather than first tried in the one
+deployment where a mistake costs the most. Configuring SMTP also withdraws the dev-inbox helper
+automatically, since that helper only reads the in-memory sender.
+
+Define them wherever the process gets its environment: a gitignored `.env` for local work, or the
+exported environment / PM2 ecosystem file on a VM (see
+[Deployment and operations](docs/deployment.md)). They hold a password, so they do not belong in a
+checked-in file or in shell history.
+
+Check them before a user is waiting on a code:
+
+```sh
+npm run mail:check
+```
+
+This opens the connection and authenticates, but sends nothing. It is not a promise that mail
+arrives - relaying rules, SPF/DMARC and recipient filtering are decided after this point, and only
+a real send exercises those. What it does rule out is the majority of setup failures: an
+unreachable host, a `SMTP_SECURE` that does not match the port, and credentials the relay rejects.
+
+Only `fluttersea.com`, `sisal.com` and `sisal.it` addresses can request a code
+(`ALLOWED_EMAIL_DOMAINS` in `src/auth/service.ts`), so a test send has to go to one of those.
+
+If delivery fails, the caller gets `503 AUTH_DELIVERY_FAILED` with no reason - naming it would
+confirm the address is eligible, which the uniform responses exist to avoid. The reason is written
+to the server log instead, because it is a property of this server's configuration and the operator
+is the one who needs it.
 
 Sessions are stored as token hashes and can be revoked server-side. Cookie `Secure` defaults to
 false because the current internal deployment deliberately uses plain HTTP; this means sign-in
@@ -246,7 +304,7 @@ data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<
   disconnects. A client whose socket buffer stays full is dropped (it will reconnect). On
   shutdown the server ends every stream before closing, and new connections get `503`.
 - **Single process:** the hub (`src/events/hub.ts`) is in-memory. Run exactly one API process
-  per SQLite database; there is no cross-process or distributed fan-out.
+  for the deployment; there is no cross-process or distributed fan-out.
 - **Reverse proxy:** nginx buffers proxied responses by default. Its `/api` location must disable
   proxy buffering and use a long read timeout for SSE. If live updates stop while the API
   otherwise appears healthy, check nginx buffering/timeouts first.
@@ -341,45 +399,9 @@ delays the stream.
 
 ### Backup and restore
 
-The database is a single SQLite file in WAL mode. For a live backup, use SQLite's online backup
-API (for example `sqlite3 "$DATABASE_PATH" ".backup backup.sqlite"`), then verify the backup
-with `PRAGMA integrity_check`. Do not copy only the `.sqlite` file while the API is running:
-committed pages may still be in `-wal`, so such a copy can omit recent data or be inconsistent.
-See [Deployment and operations](docs/deployment.md#sqlite-backup-and-restore) for a tested
-backup and restore procedure.
-
-### Migration caveat: case-folded name keys
-
-Uniqueness checks compare a `name_key` column computed in JavaScript with
-`name.normalize("NFC").toLowerCase()`, which is locale-independent Unicode. SQL migrations
-cannot reproduce that: `0001_environment_name_unique` backfills `environments.name_key` with
-SQLite's `lower()`, which folds **ASCII only**. On a database that already held environments,
-that would give non-ASCII names (such as `ÄRGER` → `Ärger`) wrong keys, so `ärger` could be
-created alongside it. Names that differ only in non-ASCII case would also slip past the new
-unique index. (Names that differ only in ASCII case make the migration itself fail and roll
-back.) No deployment data exists yet, so today this matters only for local databases.
-
-Safeguards:
-
-1. After migrations, startup (and `npm run db:migrate`) runs `reconcileNameKeys`
-   (`src/db/nameKeys.ts`). In one transaction it recomputes every collection, item and
-   environment `name_key` in JavaScript. If the corrected keys would make active names collide,
-   it refuses to write anything and the process exits with the colliding IDs, rather than
-   weakening uniqueness.
-2. Safe upgrade path for any populated database:
-   1. Stop the API and back up the database (see above).
-   2. Preflight: run `npm run db:check-name-keys`. It is read-only, also works before `0001`
-      is applied, and lists every group of active names that collide case-insensitively.
-   3. Resolve each collision by renaming or trashing all but one entry (for example with
-      `sqlite3` on the stopped database, or through the API on the old version). Repeat step 2
-      until it exits `0`.
-   4. Start the API (or run `npm run db:migrate`). Migrations and key reconciliation run, then
-      step 2 reports no changes.
-   5. If startup reports a `NameKeyCollisionError`, `0001` has already committed but keys are
-      unchanged. Resolve the listed IDs and start again, or restore the backup.
-3. Future migrations that add or change `name_key`-style columns must not rely on SQL
-   `lower()`/`upper()`. Backfill a placeholder in SQL and leave the real value to
-   `reconcileNameKeys`, which runs after every migration.
+Use `mysqldump --single-transaction` for an online consistent backup and restore into a newly
+created MySQL database with the required `utf8mb4_0900_bin` collation. The supported cutover is a
+clean MySQL installation; existing SQLite files are not imported or modified.
 
 ## Structure
 
@@ -390,7 +412,7 @@ Safeguards:
 - `src/events/` – in-process change-event hub (publish after commit, replay buffer)
 - `src/services/` – persistence/business rules with explicit transaction boundaries
 - `src/validation/schemas.ts` – Zod request schemas
-- `src/db/` – Drizzle schema, connection/migration helpers, name-key reconciliation, migrate/check CLIs
+- `src/db/` – Drizzle MySQL schema, connection/migration helpers, and migration CLI
 - `tests/unit`, `tests/integration` – Vitest and Supertest suites
 
 Errors are returned as `{ "error": { "code", "message", "details?" } }`.

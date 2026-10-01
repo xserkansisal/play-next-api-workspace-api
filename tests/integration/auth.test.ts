@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { connectSse, startServer } from "../sse.js";
-import { createTestContext, type TestContext } from "../helpers.js";
+import { createTestContext, dropTestDatabase, queryRows, type TestContext } from "../helpers.js";
+import { MemoryEmailCodeSender } from "../../src/auth/email.js";
 
 let ctx: TestContext | undefined;
 
@@ -70,18 +74,13 @@ describe("email code sign-in", () => {
   it("stores only a keyed code hash and returns the configured 15-minute expiry", async () => {
     const context = await setup();
     const message = await issueCode(context, "hash@sisal.com");
-    const row = context.db.$client.prepare("SELECT code_hash, expires_at FROM auth_codes WHERE email = ?").get("hash@sisal.com") as {
-      code_hash: string;
-      expires_at: string;
-    };
-    const codeColumns = context.db.$client.prepare("PRAGMA table_info(auth_codes)").all() as Array<{ name: string }>;
-    const issuedAt = context.db.$client.prepare("SELECT created_at FROM auth_codes WHERE email = ?").get("hash@sisal.com") as {
-      created_at: string;
-    };
+    const row = (await queryRows(context.db, "SELECT code_hash, expires_at FROM auth_codes WHERE email = ?", ["hash@sisal.com"]))[0]!;
+    const codeColumns = await queryRows(context.db, "SHOW COLUMNS FROM auth_codes");
+    const issuedAt = (await queryRows(context.db, "SELECT created_at FROM auth_codes WHERE email = ?", ["hash@sisal.com"]))[0]!;
     expect(row.code_hash).not.toContain(message.code);
     expect(row.code_hash).toMatch(/^[a-f0-9]{64}$/);
-    expect(codeColumns.map(({ name }) => name)).toContain("code_hash");
-    expect(codeColumns.map(({ name }) => name)).not.toContain("code");
+    expect(codeColumns.map(({ Field }) => Field)).toContain("code_hash");
+    expect(codeColumns.map(({ Field }) => Field)).not.toContain("code");
     expect(Date.parse(row.expires_at) - Date.parse(message.expiresAt)).toBe(0);
     expect(Date.parse(row.expires_at) - Date.parse(issuedAt.created_at)).toBe(900_000);
   });
@@ -89,10 +88,10 @@ describe("email code sign-in", () => {
   it("rejects expired and already-used codes", async () => {
     const context = await setup();
     const expired = await issueCode(context, "expired@sisal.com");
-    context.db.$client.prepare("UPDATE auth_codes SET expires_at = ? WHERE email = ?").run(
+    await context.db.$client.query("UPDATE auth_codes SET expires_at = ? WHERE email = ?", [
       new Date(Date.now() - 1000).toISOString(),
       expired.to,
-    );
+    ]);
     await verify(context, expired.to, expired.code).expect(401);
 
     const current = await issueCode(context, "single@sisal.com");
@@ -140,11 +139,8 @@ describe("email code sign-in", () => {
     expect(setCookie).toContain("SameSite=Lax");
     expect(setCookie).not.toContain("Secure");
     const token = cookieValue(setCookie);
-    const stored = context.db.$client.prepare("SELECT token_hash FROM auth_sessions").get() as { token_hash: string };
-    const sessionTimes = context.db.$client.prepare("SELECT created_at, expires_at FROM auth_sessions").get() as {
-      created_at: string;
-      expires_at: string;
-    };
+    const stored = (await queryRows(context.db, "SELECT token_hash FROM auth_sessions"))[0]!;
+    const sessionTimes = (await queryRows(context.db, "SELECT created_at, expires_at FROM auth_sessions"))[0]!;
     expect(stored.token_hash).not.toBe(token);
     expect(stored.token_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(Date.parse(sessionTimes.expires_at) - Date.parse(sessionTimes.created_at)).toBe(2_592_000_000);
@@ -162,7 +158,7 @@ describe("email code sign-in", () => {
     const message = await issueCode(context);
     const response = await verify(context, message.to, message.code).expect(200);
     const setCookie = setCookieHeader(response);
-    context.db.$client.prepare("UPDATE auth_sessions SET expires_at = ?").run(new Date(Date.now() - 1000).toISOString());
+    await context.db.$client.query("UPDATE auth_sessions SET expires_at = ?", [new Date(Date.now() - 1000).toISOString()]);
     await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookiePair(setCookie)).expect(401);
   });
 
@@ -272,11 +268,10 @@ describe("email code sign-in", () => {
     const message = await issueCode(context);
     const login = await verify(context, message.to, message.code).expect(200);
     const timestamp = new Date().toISOString();
-    context.db.$client
-      .prepare(
-        "INSERT INTO collections (id, name, name_key, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run("00000000-0000-4000-8000-000000000001", "Legacy", "legacy", "", timestamp, timestamp);
+    await context.db.$client.query(
+      "INSERT INTO collections (id, name, name_key, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["00000000-0000-4000-8000-000000000001", "Legacy", "legacy", "", timestamp, timestamp],
+    );
     const collection = await context.unauthenticatedApi
       .get("/api/v1/collections/00000000-0000-4000-8000-000000000001")
       .set("Cookie", cookiePair(setCookieHeader(login)))
@@ -309,5 +304,93 @@ describe("email code sign-in", () => {
       .set("X-Dev-Inbox-Token", token)
       .expect(200);
     expect(inbox.body.code).toBe(message.code);
+  });
+
+  // A misconfigured SMTP host is otherwise a 503 with the reason discarded, which leaves an
+  // operator setting up mail with nothing to go on. The caller is still told only that delivery
+  // failed, because naming the reason would confirm the address is eligible.
+  it("records why a sign-in code could not be delivered without telling the caller", async () => {
+    const logged: unknown[] = [];
+    const failing = new MemoryEmailCodeSender();
+    failing.sendCode = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:587");
+    };
+    const context = await setup({ emailSender: failing, logger: (err) => logged.push(err) });
+
+    const response = await context.unauthenticatedApi
+      .post("/api/v1/auth/request-code")
+      .send({ email: "person@sisal.com" })
+      .expect(503);
+
+    expect(response.body.error.code).toBe("AUTH_DELIVERY_FAILED");
+    expect(response.body.error.message).not.toContain("ECONNREFUSED");
+    expect(String(logged[0])).toContain("ECONNREFUSED");
+  });
+
+  // A reverse proxy on the same machine makes every caller look local, which would turn the
+  // loopback restriction into no restriction at all and hand sign-in codes to anyone holding the
+  // token. Verified against a real nginx: without this, a request from another host reached the
+  // route through the proxy and got the code, while the same request sent directly got 404.
+  it.each(["x-forwarded-for", "x-real-ip", "forwarded"])(
+    "refuses the development inbox to a request relayed through a proxy (%s)",
+    async (header) => {
+      const token = "local-dev-inbox-secret-token-that-is-long";
+      const context = await setup({ env: { NODE_ENV: "development", AUTH_DEV_INBOX_TOKEN: token } });
+      const message = await issueCode(context);
+      await context.unauthenticatedApi
+        .get(`/api/v1/auth/dev-inbox?email=${encodeURIComponent(message.to)}`)
+        .set("X-Dev-Inbox-Token", token)
+        .set(header, header === "forwarded" ? "for=203.0.113.9" : "203.0.113.9")
+        .expect(404);
+    },
+  );
+
+  // Rotating AUTH_CODE_PEPPER is the recommended response to a suspected leak, so what it costs
+  // has to be known rather than assumed. Measured here: sessions survive (they are hashed without
+  // the pepper), only codes already in flight are invalidated, and those users request another.
+  it("keeps sessions signed in when the code pepper is rotated, and only invalidates codes in flight", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pepper-rotation-"));
+    const databasePath = join(directory, "rotation");
+    const before = await createTestContext(databasePath, {
+      authenticate: false,
+      env: { AUTH_CODE_PEPPER: "a-pepper-used-before-the-rotation-000000" },
+    });
+
+    let sessionCookie: string;
+    let codeInFlight: string;
+    try {
+      const signIn = await issueCode(before, "stays@sisal.com");
+      const session = await before.unauthenticatedApi
+        .post("/api/v1/auth/verify-code")
+        .send({ email: signIn.to, code: signIn.code })
+        .expect(200);
+      sessionCookie = session.headers["set-cookie"]![0]!.split(";", 1)[0]!;
+
+      const pending = await issueCode(before, "midflight@sisal.com");
+      codeInFlight = pending.code;
+    } finally {
+      await before.close();
+    }
+
+    ctx = await createTestContext(databasePath, {
+      authenticate: false,
+      env: { AUTH_CODE_PEPPER: "a-different-pepper-after-the-rotation-111" },
+    });
+
+    await ctx.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", sessionCookie).expect(200);
+
+    await ctx.unauthenticatedApi
+      .post("/api/v1/auth/verify-code")
+      .send({ email: "midflight@sisal.com", code: codeInFlight })
+      .expect(401);
+
+    const reissued = await issueCode(ctx, "midflight@sisal.com");
+    await ctx.unauthenticatedApi
+      .post("/api/v1/auth/verify-code")
+      .send({ email: reissued.to, code: reissued.code })
+      .expect(200);
+
+    await dropTestDatabase(databasePath);
+    rmSync(directory, { recursive: true, force: true });
   });
 });

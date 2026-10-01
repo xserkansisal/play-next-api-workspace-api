@@ -2,29 +2,44 @@ import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import { authenticatedUserId } from "../middleware/authenticate.js";
-import { deleteVariable, listVariables, setVariable } from "../services/variables.js";
-import { variableInputSchema, variableKeySchema, variableScopeSchema } from "../validation/schemas.js";
+import {
+  deleteVariable,
+  getVariableDisplayOrder,
+  listVariables,
+  setVariable,
+  setVariableDisplayOrder,
+} from "../services/variables.js";
+import { variableDisplayOrderSchema, variableInputSchema, variableKeySchema, variableScopeSchema } from "../validation/schemas.js";
 
 export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
-  router.get("/", (req, res) => {
-    res.json({ variables: listVariables(db, authenticatedUserId(req)) });
+  router.get("/", async (req, res) => {
+    res.json({ variables: await listVariables(db, authenticatedUserId(req)) });
   });
 
-  router.put("/:scope/:key", (req, res) => {
+  router.get("/order", async (req, res) => {
+    res.json({ order: await getVariableDisplayOrder(db, authenticatedUserId(req)) });
+  });
+
+  router.put("/order", async (req, res) => {
+    const { order } = variableDisplayOrderSchema.parse(req.body);
+    res.json({ order: await setVariableDisplayOrder(db, authenticatedUserId(req), order) });
+  });
+
+  router.put("/:scope/:key", async (req, res) => {
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
     const { value } = variableInputSchema.parse(req.body);
-    const variable = setVariable(db, authenticatedUserId(req), scope, key, value);
+    const variable = await setVariable(db, authenticatedUserId(req), scope, key, value);
     publishIfShared(events, variable.scope, key, variable.updatedAt, "updated");
     res.json(variable);
   });
 
-  router.delete("/:scope/:key", (req, res) => {
+  router.delete("/:scope/:key", async (req, res) => {
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
-    deleteVariable(db, authenticatedUserId(req), scope, key);
+    await deleteVariable(db, authenticatedUserId(req), scope, key);
     publishIfShared(events, scope, key, new Date().toISOString(), "trashed");
     res.status(204).end();
   });

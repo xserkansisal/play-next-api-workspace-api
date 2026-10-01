@@ -1,13 +1,15 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import type { RunResult } from "better-sqlite3";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import type { ExtractTablesWithRelations } from "drizzle-orm";
+import type { MySql2Transaction } from "drizzle-orm/mysql2";
+import type { AppDatabase } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { items, requestDetails, requestHeaders, requestQueryParams, users } from "../db/schema.js";
+import { first } from "../db/query.js";
 import { ConflictError } from "../errors.js";
 import type { RequestItemFields, TreeNodeInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId } from "./common.js";
 
-export type DbExecutor = BaseSQLiteDatabase<"sync", RunResult, typeof schema>;
+export type DbExecutor = AppDatabase | MySql2Transaction<typeof schema, ExtractTablesWithRelations<typeof schema>>;
 
 export interface KeyValueRow {
   key: string;
@@ -48,13 +50,12 @@ export type ItemNode = FolderNode | RequestNode;
 type ItemRow = typeof items.$inferSelect;
 
 /** Loads the active item tree of a collection, with siblings sorted alphabetically. */
-export function loadActiveTree(db: DbExecutor, collectionId: string): { roots: ItemNode[]; byId: Map<string, ItemNode> } {
-  const rows = db
-    .select()
-    .from(items)
-    .where(and(eq(items.collectionId, collectionId), isNull(items.deletedAt)))
-    .all();
-  const nodes = buildNodes(db, rows);
+export async function loadActiveTree(
+  db: DbExecutor,
+  collectionId: string,
+): Promise<{ roots: ItemNode[]; byId: Map<string, ItemNode> }> {
+  const rows = await db.select().from(items).where(and(eq(items.collectionId, collectionId), isNull(items.deletedAt)));
+  const nodes = await buildNodes(db, rows);
 
   const roots: ItemNode[] = [];
   for (const node of nodes.values()) {
@@ -70,7 +71,7 @@ export function loadActiveTree(db: DbExecutor, collectionId: string): { roots: I
   return { roots, byId: nodes };
 }
 
-function buildNodes(db: DbExecutor, rows: ItemRow[]): Map<string, ItemNode> {
+async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, ItemNode>> {
   const requestIds = rows.filter((r) => r.kind === "request").map((r) => r.id);
   const details = new Map<string, typeof requestDetails.$inferSelect>();
   const params = new Map<string, KeyValueRow[]>();
@@ -79,28 +80,25 @@ function buildNodes(db: DbExecutor, rows: ItemRow[]): Map<string, ItemNode> {
   const userEmails = new Map(
     userIds.length === 0
       ? []
-      : db
+      : (await db
           .select({ id: users.id, email: users.email })
           .from(users)
-          .where(inArray(users.id, userIds))
-          .all()
-          .map((user) => [user.id, user.email] as const),
+          .where(inArray(users.id, userIds))).map((user) => [user.id, user.email] as const),
   );
 
   for (const chunk of chunks(requestIds, 500)) {
-    for (const d of db.select().from(requestDetails).where(inArray(requestDetails.itemId, chunk)).all()) {
+    for (const d of await db.select().from(requestDetails).where(inArray(requestDetails.itemId, chunk))) {
       details.set(d.itemId, d);
     }
     for (const [table, target] of [
       [requestQueryParams, params],
       [requestHeaders, headers],
     ] as const) {
-      const kvRows = db
+      const kvRows = await db
         .select()
         .from(table)
         .where(inArray(table.requestId, chunk))
-        .orderBy(asc(table.requestId), asc(table.position))
-        .all();
+        .orderBy(asc(table.requestId), asc(table.position));
       for (const row of kvRows) {
         const list = target.get(row.requestId) ?? [];
         list.push({ key: row.key, value: row.value, description: row.description, enabled: row.enabled });
@@ -146,22 +144,24 @@ function* chunks<T>(list: T[], size: number): Generator<T[]> {
   for (let i = 0; i < list.length; i += size) yield list.slice(i, i + size);
 }
 
-export function findActiveItem(db: DbExecutor, collectionId: string, itemId: string): ItemRow | undefined {
-  return db
-    .select()
-    .from(items)
-    .where(and(eq(items.id, itemId), eq(items.collectionId, collectionId), isNull(items.deletedAt)))
-    .get();
+export async function findActiveItem(db: DbExecutor, collectionId: string, itemId: string): Promise<ItemRow | undefined> {
+  return first(
+    db
+      .select()
+      .from(items)
+      .where(and(eq(items.id, itemId), eq(items.collectionId, collectionId), isNull(items.deletedAt)))
+      .limit(1),
+  );
 }
 
-export function findActiveSiblingFolder(
+export async function findActiveSiblingFolder(
   db: DbExecutor,
   collectionId: string,
   parentId: string | null,
   name: string,
   excludeId?: string,
-): ItemRow | undefined {
-  const rows = db
+): Promise<ItemRow | undefined> {
+  const rows = await db
     .select()
     .from(items)
     .where(
@@ -172,8 +172,7 @@ export function findActiveSiblingFolder(
         eq(items.nameKey, nameKey(name)),
         isNull(items.deletedAt),
       ),
-    )
-    .all();
+    );
   return rows.find((r) => r.id !== excludeId);
 }
 
@@ -185,7 +184,12 @@ export function folderConflictError(name: string, parentId: string | null, exist
   });
 }
 
-export function writeRequestDetails(db: DbExecutor, itemId: string, fields: RequestItemFields, isNew: boolean): void {
+export async function writeRequestDetails(
+  db: DbExecutor,
+  itemId: string,
+  fields: RequestItemFields,
+  isNew: boolean,
+): Promise<void> {
   const values = {
     method: fields.method,
     url: fields.url,
@@ -194,71 +198,76 @@ export function writeRequestDetails(db: DbExecutor, itemId: string, fields: Requ
     authType: fields.auth.type,
   };
   if (isNew) {
-    db.insert(requestDetails).values({ itemId, ...values }).run();
+    await db.insert(requestDetails).values({ itemId, ...values });
   } else {
-    db.update(requestDetails).set(values).where(eq(requestDetails.itemId, itemId)).run();
-    db.delete(requestQueryParams).where(eq(requestQueryParams.requestId, itemId)).run();
-    db.delete(requestHeaders).where(eq(requestHeaders.requestId, itemId)).run();
+    await db.update(requestDetails).set(values).where(eq(requestDetails.itemId, itemId));
+    await db.delete(requestQueryParams).where(eq(requestQueryParams.requestId, itemId));
+    await db.delete(requestHeaders).where(eq(requestHeaders.requestId, itemId));
   }
   if (fields.queryParams.length > 0) {
-    db.insert(requestQueryParams)
-      .values(fields.queryParams.map((row, position) => ({ requestId: itemId, position, ...row })))
-      .run();
+    await db
+      .insert(requestQueryParams)
+      .values(fields.queryParams.map((row, position) => ({ requestId: itemId, position, ...row })));
   }
   if (fields.headers.length > 0) {
-    db.insert(requestHeaders)
-      .values(fields.headers.map((row, position) => ({ requestId: itemId, position, ...row })))
-      .run();
+    await db
+      .insert(requestHeaders)
+      .values(fields.headers.map((row, position) => ({ requestId: itemId, position, ...row })));
   }
 }
 
 /** Inserts a validated tree beneath `parentId`, rejecting duplicate sibling folder names. */
-export function insertTree(
+export async function insertTree(
   db: DbExecutor,
   collectionId: string,
   parentId: string | null,
   nodes: TreeNodeInput[],
   timestamp: string,
   actorId: string,
-): void {
+): Promise<void> {
   const seenFolders = new Map<string, string>();
   for (const node of nodes) {
     const id = newId();
     if (node.type === "folder") {
       const key = nameKey(node.name);
-      const existing = seenFolders.get(key) ?? findActiveSiblingFolder(db, collectionId, parentId, node.name)?.id;
+      const existing = seenFolders.get(key) ?? (await findActiveSiblingFolder(db, collectionId, parentId, node.name))?.id;
       if (existing) throw folderConflictError(node.name, parentId, existing);
       seenFolders.set(key, id);
     }
-    db.insert(items)
-      .values({
-        id,
-        collectionId,
-        parentId,
-        kind: node.type,
-        name: node.name,
-        nameKey: nameKey(node.name),
-        description: node.description,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        createdBy: actorId,
-        updatedBy: actorId,
-      })
-      .run();
-    if (node.type === "request") writeRequestDetails(db, id, node, true);
-    else insertTree(db, collectionId, id, node.items, timestamp, actorId);
+    await db.insert(items).values({
+      id,
+      collectionId,
+      parentId,
+      kind: node.type,
+      name: node.name,
+      nameKey: nameKey(node.name),
+      description: node.description,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      createdBy: actorId,
+      updatedBy: actorId,
+    });
+    if (node.type === "request") await writeRequestDetails(db, id, node, true);
+    else await insertTree(db, collectionId, id, node.items, timestamp, actorId);
   }
 }
 
 /** Returns the IDs of `itemId` and all its active descendants. */
-export function activeSubtreeIds(db: DbExecutor, itemId: string): string[] {
-  const rows = db.all<{ id: string }>(sql`
-    WITH RECURSIVE subtree(id) AS (
-      SELECT id FROM items WHERE id = ${itemId} AND deleted_at IS NULL
-      UNION ALL
-      SELECT i.id FROM items i JOIN subtree s ON i.parent_id = s.id WHERE i.deleted_at IS NULL
-    )
-    SELECT id FROM subtree
-  `);
-  return rows.map((r) => r.id);
+export async function activeSubtreeIds(db: DbExecutor, itemId: string): Promise<string[]> {
+  const root = await first(
+    db.select({ id: items.id }).from(items).where(and(eq(items.id, itemId), isNull(items.deletedAt))).limit(1),
+  );
+  if (!root) return [];
+
+  const ids = [itemId];
+  let parents = [itemId];
+  while (parents.length > 0) {
+    const children = await db
+      .select({ id: items.id })
+      .from(items)
+      .where(and(inArray(items.parentId, parents), isNull(items.deletedAt)));
+    parents = children.map((row) => row.id);
+    ids.push(...parents);
+  }
+  return ids;
 }

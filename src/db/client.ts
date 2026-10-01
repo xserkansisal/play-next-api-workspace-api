@@ -1,51 +1,72 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
-import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { reconcileNameKeys } from "./nameKeys.js";
+import { createPool, type Pool, type RowDataPacket } from "mysql2/promise";
+import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
+import { migrate } from "drizzle-orm/mysql2/migrator";
+import type { Env } from "../config/env.js";
 import * as schema from "./schema.js";
 
-export type AppDatabase = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
+export type AppDatabase = MySql2Database<typeof schema> & { $client: Pool };
 
-// Resolves to <repo>/drizzle from both src/db (tsx) and dist/db (compiled).
-export const MIGRATIONS_FOLDER = fileURLToPath(new URL("../../drizzle", import.meta.url));
+export const MIGRATIONS_FOLDER = fileURLToPath(new URL("../../drizzle-mysql", import.meta.url));
 
 export interface OpenDatabaseOptions {
   migrate?: boolean;
 }
 
-export function openDatabase(path: string, options: OpenDatabaseOptions = {}): AppDatabase {
-  if (path !== ":memory:" && !path.startsWith("file:")) {
-    mkdirSync(dirname(path), { recursive: true });
+function assertSupportedServer(version: string, collation: string): void {
+  const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (
+    version.includes("MariaDB") ||
+    !parsed ||
+    Number(parsed[1]) < 8 ||
+    (Number(parsed[1]) === 8 && Number(parsed[2]) === 0 && Number(parsed[3]) < 16)
+  ) {
+    throw new Error(`MySQL 8.0.16 or newer is required; connected server reports ${version}`);
   }
-
-  const sqlite = new Database(path);
-  sqlite.pragma("foreign_keys = ON");
-  sqlite.pragma("busy_timeout = 5000");
-  if (path !== ":memory:") {
-    sqlite.pragma("journal_mode = WAL");
+  if (collation !== "utf8mb4_0900_bin") {
+    throw new Error(
+      `Database ${collation || "(unknown)"} collation is unsupported; create ${process.env.MYSQL_DATABASE ?? "the database"} with utf8mb4_0900_bin (exact, case-sensitive text comparisons)`,
+    );
   }
+}
 
-  const db = drizzle(sqlite, { schema }) as AppDatabase;
-  if (options.migrate ?? true) {
-    try {
-      runMigrations(db);
-    } catch (err) {
-      sqlite.close();
-      throw err;
+export async function openDatabase(env: Env, options: OpenDatabaseOptions = {}): Promise<AppDatabase> {
+  const pool = createPool({
+    host: env.MYSQL_HOST,
+    port: env.MYSQL_PORT,
+    user: env.MYSQL_USER,
+    password: env.MYSQL_PASSWORD,
+    database: env.MYSQL_DATABASE,
+    charset: "utf8mb4",
+    timezone: "Z",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
+
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      "SELECT VERSION() AS version, @@collation_database AS collation",
+    );
+    const server = rows[0];
+    if (!server || typeof server.version !== "string" || typeof server.collation !== "string") {
+      throw new Error("MySQL did not return its server version and database collation");
     }
+    assertSupportedServer(server.version, server.collation);
+
+    const db = drizzle(pool, { schema, mode: "default" }) as AppDatabase;
+    if (options.migrate ?? true) await runMigrations(db);
+    return db;
+  } catch (error) {
+    await pool.end();
+    throw error;
   }
-  return db;
 }
 
-/** Applies pending migrations, then repairs name keys that SQL backfills could not fold correctly. */
-export function runMigrations(db: AppDatabase): void {
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  reconcileNameKeys(db);
+export async function runMigrations(db: AppDatabase): Promise<void> {
+  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 }
 
-export function closeDatabase(db: AppDatabase): void {
-  db.$client.close();
+export async function closeDatabase(db: AppDatabase): Promise<void> {
+  await db.$client.end();
 }

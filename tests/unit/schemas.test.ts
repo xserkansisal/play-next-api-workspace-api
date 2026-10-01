@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createCollectionSchema, createItemSchema, environmentInputSchema, restoreSchema } from "../../src/validation/schemas.js";
+import {
+  createCollectionSchema,
+  createItemSchema,
+  environmentInputSchema,
+  restoreSchema,
+  variableDisplayOrderSchema,
+} from "../../src/validation/schemas.js";
 import { compareByName, nameKey } from "../../src/services/common.js";
 
 describe("validation schemas", () => {
@@ -37,6 +43,17 @@ describe("validation schemas", () => {
     const result = environmentInputSchema.safeParse({ name: "E", variables: [{ key: "a", value: "" }, { key: "a", value: "" }] });
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.path).toEqual(["variables", 1, "key"]);
+  });
+
+  it("validates full variable display orders using variable key rules", () => {
+    expect(variableDisplayOrderSchema.parse({ order: ["token", "environmentOnly"] })).toEqual({
+      order: ["token", "environmentOnly"],
+    });
+    expect(variableDisplayOrderSchema.parse({ order: [] })).toEqual({ order: [] });
+    expect(variableDisplayOrderSchema.safeParse({ order: ["token", " token "] }).success).toBe(false);
+    expect(variableDisplayOrderSchema.safeParse({ order: ["two words"] }).success).toBe(false);
+    expect(variableDisplayOrderSchema.safeParse({ order: ["{invalid}"] }).success).toBe(false);
+    expect(variableDisplayOrderSchema.safeParse({ order: ["token"], extra: true }).success).toBe(false);
   });
 
   it("defaults restore input when omitted", () => {

@@ -17,7 +17,7 @@ module.exports = {
       name: "play-next-api",
       cwd: __dirname,
       script: "./dist/server.js",
-      // The SSE hub and SQLite writer are process-local; do not use cluster mode or scale out.
+      // The SSE hub is process-local; do not use cluster mode or scale out.
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
@@ -32,7 +32,11 @@ module.exports = {
         NODE_ENV: "production",
         HOST: process.env.HOST || "127.0.0.1",
         PORT: required("PORT"),
-        DATABASE_PATH: required("DATABASE_PATH"),
+        MYSQL_HOST: process.env.MYSQL_HOST || "127.0.0.1",
+        MYSQL_PORT: process.env.MYSQL_PORT || "3306",
+        MYSQL_USER: required("MYSQL_USER"),
+        MYSQL_PASSWORD: required("MYSQL_PASSWORD"),
+        MYSQL_DATABASE: required("MYSQL_DATABASE"),
         SSE_HEARTBEAT_MS: process.env.SSE_HEARTBEAT_MS || "15000",
         SSE_RETRY_MS: process.env.SSE_RETRY_MS || "3000",
         AUTH_CODE_PEPPER: required("AUTH_CODE_PEPPER"),
@@ -53,6 +57,13 @@ module.exports = {
         ...(process.env.SMTP_FROM ? { SMTP_FROM: process.env.SMTP_FROM } : {}),
         ...(process.env.AUTH_DEV_INBOX_TOKEN ? { AUTH_DEV_INBOX_TOKEN: process.env.AUTH_DEV_INBOX_TOKEN } : {}),
         ...(process.env.CORS_ORIGIN ? { CORS_ORIGIN: process.env.CORS_ORIGIN } : {}),
+        // Server-side request execution. Without these the API sees no allow-list and refuses
+        // every proxied request, so "Send from: Server" silently stops working in production even
+        // though the operator exported the hosts. Left absent when unset, so the API keeps its own
+        // safe default of having the proxy disabled.
+        ...(process.env.PROXY_ALLOWED_HOSTS ? { PROXY_ALLOWED_HOSTS: process.env.PROXY_ALLOWED_HOSTS } : {}),
+        PROXY_TIMEOUT_MS: process.env.PROXY_TIMEOUT_MS || "30000",
+        PROXY_MAX_RESPONSE_BYTES: process.env.PROXY_MAX_RESPONSE_BYTES || "10485760",
       },
     },
   ],

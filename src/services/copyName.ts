@@ -39,3 +39,12 @@ export function copyName(name: string, isTaken: (candidate: string) => boolean):
     if (!isTaken(candidate)) return candidate;
   }
 }
+
+export async function copyNameAsync(name: string, isTaken: (candidate: string) => Promise<boolean>): Promise<string> {
+  const stem = copyStem(name);
+  for (let n = 1; ; n += 1) {
+    const marker = n === 1 ? " (copy)" : ` (copy ${n})`;
+    const candidate = stem.slice(0, MAX_NAME_LENGTH - marker.length).trimEnd() + marker;
+    if (!(await isTaken(candidate))) return candidate;
+  }
+}

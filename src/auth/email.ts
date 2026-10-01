@@ -25,10 +25,30 @@ export class MemoryEmailCodeSender implements EmailCodeSender {
   }
 }
 
-export class SmtpEmailCodeSender implements EmailCodeSender {
-  private readonly transporter: Transporter;
+export type SmtpEnv = Pick<Env, "SMTP_HOST" | "SMTP_PORT" | "SMTP_SECURE" | "SMTP_USER" | "SMTP_PASSWORD" | "SMTP_FROM">;
 
-  constructor(private readonly env: Pick<Env, "SMTP_HOST" | "SMTP_PORT" | "SMTP_SECURE" | "SMTP_USER" | "SMTP_PASSWORD" | "SMTP_FROM">) {
+/**
+ * Opens the SMTP connection and authenticates without sending anything, so settings can be checked
+ * before a user is waiting on a code. Returns the failure rather than throwing: the reason is the
+ * whole point of asking, and a stack trace from deep inside nodemailer buries it.
+ */
+export async function verifySmtpConnection(env: SmtpEnv): Promise<{ ok: true } | { ok: false; error: string }> {
+  let transporter: Transporter | undefined;
+  try {
+    transporter = new SmtpEmailCodeSender(env).transporter;
+    await transporter.verify();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    transporter?.close();
+  }
+}
+
+export class SmtpEmailCodeSender implements EmailCodeSender {
+  readonly transporter: Transporter;
+
+  constructor(private readonly env: SmtpEnv) {
     if (!env.SMTP_HOST || !env.SMTP_FROM) throw new Error("SMTP host and sender are required");
     this.transporter = nodemailer.createTransport({
       host: env.SMTP_HOST,
