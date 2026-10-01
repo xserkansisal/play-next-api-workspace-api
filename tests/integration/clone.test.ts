@@ -18,12 +18,18 @@ describe("cloning a collection", () => {
     const source = await createCollection({
       name: "Commerce",
       description: "Storefront",
+      auth: { type: "bearer", token: "collection-token" },
       items: [
         {
           type: "folder",
           name: "Orders",
+          auth: { type: "basic", username: "team", password: "folder-password" },
           items: [
-            { type: "folder", name: "Archive", items: [{ type: "request", name: "Old", ...requestFields }] },
+            {
+              type: "folder",
+              name: "Archive",
+              items: [{ type: "request", name: "Old", ...requestFields, auth: { type: "inherit" } }],
+            },
             { type: "request", name: "List", ...requestFields },
           ],
         },
@@ -35,11 +41,13 @@ describe("cloning a collection", () => {
 
     expect(clone.id).not.toBe(source.id);
     expect(clone).toMatchObject({ name: "Commerce (copy)", description: "Storefront" });
+    expect(clone.auth).toEqual(source.auth);
     expect(names(clone.items)).toEqual(["Health", "Orders"]);
 
     const orders = clone.items[1];
     expect(orders.parentId).toBeNull();
     expect(orders.collectionId).toBe(clone.id);
+    expect(orders.auth).toEqual({ type: "basic", username: "team", password: "folder-password" });
     expect(names(orders.items)).toEqual(["Archive", "List"]);
     expect(orders.items[0].items[0]).toMatchObject({ name: "Old", parentId: orders.items[0].id });
 
@@ -67,6 +75,7 @@ describe("cloning a collection", () => {
             { key: "X-Trace", value: "{{traceId}}", description: "", enabled: false },
           ],
           body: { type: "json", content: '{"id": {{id}}}' },
+          auth: { type: "api-key", in: "header", key: "X-API-Key", value: "request-secret" },
         },
       ],
     });
@@ -80,6 +89,7 @@ describe("cloning a collection", () => {
     expect(copied.queryParams).toEqual(original.queryParams);
     expect(copied.headers).toEqual(original.headers);
     expect(copied).toMatchObject({ method: "POST", url: original.url, body: original.body, auth: original.auth });
+    expect(copied.effectiveAuth).toEqual(original.effectiveAuth);
   });
 
   it("counts up on repeated cloning instead of nesting markers", async () => {

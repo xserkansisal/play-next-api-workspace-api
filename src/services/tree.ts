@@ -6,7 +6,7 @@ import * as schema from "../db/schema.js";
 import { items, requestDetails, requestHeaders, requestQueryParams, users } from "../db/schema.js";
 import { first } from "../db/query.js";
 import { ConflictError } from "../errors.js";
-import type { RequestItemFields, TreeNodeInput } from "../validation/schemas.js";
+import type { RequestAuth, RequestItemFields, ScopedAuth, TreeNodeInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId } from "./common.js";
 
 export type DbExecutor = AppDatabase | MySql2Transaction<typeof schema, ExtractTablesWithRelations<typeof schema>>;
@@ -32,6 +32,7 @@ interface NodeBase {
 
 export interface FolderNode extends NodeBase {
   type: "folder";
+  auth: ScopedAuth | null;
   items: ItemNode[];
 }
 
@@ -41,8 +42,9 @@ export interface RequestNode extends NodeBase {
   url: string;
   queryParams: KeyValueRow[];
   headers: KeyValueRow[];
-  body: { type: "json"; content: string } | null;
-  auth: { type: "none" };
+  body: RequestItemFields["body"];
+  auth: RequestAuth;
+  effectiveAuth: ScopedAuth;
 }
 
 export type ItemNode = FolderNode | RequestNode;
@@ -55,6 +57,8 @@ export async function loadActiveTree(
   collectionId: string,
 ): Promise<{ roots: ItemNode[]; byId: Map<string, ItemNode> }> {
   const rows = await db.select().from(items).where(and(eq(items.collectionId, collectionId), isNull(items.deletedAt)));
+  const [collection] = await db.select({ authConfig: schema.collections.authConfig }).from(schema.collections)
+    .where(eq(schema.collections.id, collectionId)).limit(1);
   const nodes = await buildNodes(db, rows);
 
   const roots: ItemNode[] = [];
@@ -68,6 +72,16 @@ export async function loadActiveTree(
     for (const node of list) if (node.type === "folder") sortRecursive(node.items);
   };
   sortRecursive(roots);
+  const applyEffectiveAuth = (list: ItemNode[], inherited: ScopedAuth | null) => {
+    for (const node of list) {
+      if (node.type === "folder") {
+        applyEffectiveAuth(node.items, node.auth ?? inherited);
+      } else {
+        node.effectiveAuth = node.auth.type === "inherit" ? inherited ?? { type: "none" } : node.auth;
+      }
+    }
+  };
+  applyEffectiveAuth(roots, collection?.authConfig ?? null);
   return { roots, byId: nodes };
 }
 
@@ -121,7 +135,7 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, 
       updatedBy: row.updatedBy ? userEmails.get(row.updatedBy) ?? null : null,
     };
     if (row.kind === "folder") {
-      nodes.set(row.id, { ...base, type: "folder", items: [] });
+      nodes.set(row.id, { ...base, type: "folder", auth: row.authConfig, items: [] });
     } else {
       const d = details.get(row.id);
       if (!d) throw new Error(`Request ${row.id} is missing its details row`);
@@ -132,12 +146,41 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, 
         url: d.url,
         queryParams: params.get(row.id) ?? [],
         headers: headers.get(row.id) ?? [],
-        body: d.bodyType === "json" && d.bodyContent !== null ? { type: "json", content: d.bodyContent } : null,
-        auth: { type: d.authType },
+        body: d.bodyType !== null && d.bodyContent !== null ? { type: d.bodyType, content: d.bodyContent } : null,
+        auth: toRequestAuth(d.authType, d.authConfig),
+        effectiveAuth: { type: "none" },
       });
     }
+
   }
   return nodes;
+}
+
+function toRequestAuth(type: string, config: Record<string, string> | null): RequestAuth {
+  switch (type) {
+    case "inherit":
+    case "none":
+      return { type };
+    case "basic":
+      return { type, username: requiredAuthValue(config, "username"), password: requiredAuthValue(config, "password") };
+    case "bearer":
+      return { type, token: requiredAuthValue(config, "token") };
+    case "api-key": {
+      const location = requiredAuthValue(config, "in");
+      if (location !== "header" && location !== "query") {
+        throw new Error(`Unsupported stored API key location "${location}"`);
+      }
+      return { type, in: location, key: requiredAuthValue(config, "key"), value: requiredAuthValue(config, "value") };
+    }
+    default:
+      throw new Error(`Unsupported stored auth type "${type}"`);
+  }
+}
+
+function requiredAuthValue(config: Record<string, string> | null, key: string): string {
+  const value = config?.[key];
+  if (value === undefined) throw new Error(`Stored auth configuration is missing "${key}"`);
+  return value;
 }
 
 function* chunks<T>(list: T[], size: number): Generator<T[]> {
@@ -196,6 +239,7 @@ export async function writeRequestDetails(
     bodyType: fields.body ? fields.body.type : null,
     bodyContent: fields.body ? fields.body.content : null,
     authType: fields.auth.type,
+    authConfig: authConfigForStorage(fields.auth),
   };
   if (isNew) {
     await db.insert(requestDetails).values({ itemId, ...values });
@@ -204,6 +248,7 @@ export async function writeRequestDetails(
     await db.delete(requestQueryParams).where(eq(requestQueryParams.requestId, itemId));
     await db.delete(requestHeaders).where(eq(requestHeaders.requestId, itemId));
   }
+
   if (fields.queryParams.length > 0) {
     await db
       .insert(requestQueryParams)
@@ -213,6 +258,20 @@ export async function writeRequestDetails(
     await db
       .insert(requestHeaders)
       .values(fields.headers.map((row, position) => ({ requestId: itemId, position, ...row })));
+  }
+}
+
+export function authConfigForStorage(auth: RequestAuth): Record<string, string> | null {
+  switch (auth.type) {
+    case "inherit":
+    case "none":
+      return null;
+    case "basic":
+      return { username: auth.username, password: auth.password };
+    case "bearer":
+      return { token: auth.token };
+    case "api-key":
+      return { in: auth.in, key: auth.key, value: auth.value };
   }
 }
 
@@ -242,6 +301,7 @@ export async function insertTree(
       name: node.name,
       nameKey: nameKey(node.name),
       description: node.description,
+      authConfig: node.type === "folder" ? node.auth ?? null : null,
       createdAt: timestamp,
       updatedAt: timestamp,
       createdBy: actorId,

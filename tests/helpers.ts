@@ -179,5 +179,5 @@ export const requestFields = {
   queryParams: [],
   headers: [],
   body: null,
-  auth: { type: "none" },
+  auth: { type: "inherit" },
 };

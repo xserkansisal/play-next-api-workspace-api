@@ -141,6 +141,7 @@ describe("moving an item across collections", () => {
   it("moves a request's details, headers and params with it", async () => {
     const source = await createCollection({
       name: "Commerce",
+      auth: { type: "bearer", token: "source-token" },
       items: [
         {
           type: "request",
@@ -154,7 +155,7 @@ describe("moving an item across collections", () => {
         },
       ],
     });
-    const target = await createCollection({ name: "Billing", items: [] });
+    const target = await createCollection({ name: "Billing", auth: { type: "api-key", in: "header", key: "X-API-Key", value: "target-key" }, items: [] });
     const charge = find(source.items, "Charge");
 
     const moved = (await move(source.id, charge.id, { targetCollectionId: target.id, parentId: null }).expect(200)).body;
@@ -165,6 +166,8 @@ describe("moving an item across collections", () => {
       headers: [{ key: "X-A", value: "1", enabled: true }],
       queryParams: [{ key: "q", value: "2", enabled: false }],
       body: { type: "json", content: "{\"a\":1}" },
+      auth: { type: "inherit" },
+      effectiveAuth: { type: "api-key", in: "header", key: "X-API-Key", value: "target-key" },
     });
   });
 });

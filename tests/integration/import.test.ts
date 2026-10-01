@@ -37,6 +37,7 @@ const sampleTree = [
     type: "folder",
     name: "Auth",
     description: "Sign-in",
+    auth: { type: "basic", username: "{{username}}", password: "{{password}}" },
     items: [
       { type: "folder", name: "Tokens", items: [{ type: "request", name: "Refresh", ...requestFields, method: "POST" }] },
       {
@@ -45,6 +46,7 @@ const sampleTree = [
         ...requestFields,
         method: "POST",
         url: "{{baseUrl}}/login",
+        auth: { type: "bearer", token: "{{loginToken}}" },
         queryParams: [
           { key: "b", value: "2" },
           { key: "a", value: "1", enabled: false },
@@ -85,6 +87,8 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
     expect(auth.items[0]).toMatchObject({
       method: "POST",
       url: "{{baseUrl}}/login",
+      auth: { type: "bearer", token: "{{loginToken}}" },
+      effectiveAuth: { type: "bearer", token: "{{loginToken}}" },
       body: { type: "json", content: '{"user":"{{user}}"}' },
       queryParams: [
         { key: "b", value: "2", description: "", enabled: true },
@@ -95,7 +99,12 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
         { key: "X-Trace", value: "1", description: "debug", enabled: true },
       ],
     });
-    expect(auth.items[1].items[0]).toMatchObject({ name: "Refresh", parentId: auth.items[1].id });
+    expect(auth.items[1].items[0]).toMatchObject({
+      name: "Refresh",
+      parentId: auth.items[1].id,
+      auth: { type: "inherit" },
+      effectiveAuth: { type: "basic", username: "{{username}}", password: "{{password}}" },
+    });
   });
 
   it("imports beneath a nested folder", async () => {
@@ -235,7 +244,7 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
     expect((await importInto(collection.id, huge).expect(413)).body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
-  it("warns about credential headers without echoing their values", async () => {
+  it("warns about credential headers and auth settings without echoing their values", async () => {
     const collection = await createCollection();
     const res = await importInto(collection.id, {
       items: [
@@ -247,6 +256,7 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
               type: "request",
               name: "Secret",
               ...requestFields,
+              auth: { type: "bearer", token: "live-token-value" },
               headers: [
                 { key: "Authorization", value: "Bearer abc.def" },
                 { key: "x-api-key", value: "{{apiKey}}" },
@@ -258,8 +268,11 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
         { type: "request", name: "Placeholder", ...requestFields, headers: [{ key: "Authorization", value: "Bearer {{token}}" }] },
       ],
     }).expect(201);
-    expect(res.body.warnings).toEqual([{ path: ["F", "Secret"], code: "SENSITIVE_HEADER", header: "Authorization" }]);
-    expect(JSON.stringify(res.body)).not.toContain("abc.def");
+    expect(res.body.warnings).toEqual([
+      { path: ["F", "Secret"], code: "SENSITIVE_HEADER", header: "Authorization" },
+      { path: ["F", "Secret"], code: "SENSITIVE_AUTH", authType: "bearer" },
+    ]);
+    expect(JSON.stringify(res.body)).not.toContain("live-token-value");
   });
 
   it("publishes one created event per root", async () => {

@@ -2,9 +2,17 @@ import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import { authenticatedUserId } from "../middleware/authenticate.js";
-import { createCollection, listCollections, readCollection, trashCollection, updateCollection } from "../services/collections.js";
+import {
+  createCollection,
+  getCollectionVersions,
+  listCollections,
+  readCollection,
+  restoreCollectionVersion,
+  trashCollection,
+  updateCollection,
+} from "../services/collections.js";
 import { cloneCollection, cloneItem } from "../services/clone.js";
-import { createItem, readItem, trashItem, updateItem } from "../services/items.js";
+import { createItem, getItemVersions, readItem, restoreItemVersion, trashItem, updateItem } from "../services/items.js";
 import { moveItem } from "../services/move.js";
 import { importItems } from "../services/import.js";
 import { HttpError } from "../errors.js";
@@ -46,6 +54,21 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
 
   router.get("/:collectionId", async (req, res) => {
     res.json(await readCollection(db, req.params.collectionId));
+  });
+
+  router.get("/:collectionId/versions", async (req, res) => {
+    res.json({ versions: await getCollectionVersions(db, req.params.collectionId) });
+  });
+
+  router.post("/:collectionId/versions/:versionId/restore", async (req, res) => {
+    const collection = await restoreCollectionVersion(
+      db,
+      req.params.collectionId,
+      req.params.versionId,
+      authenticatedUserId(req),
+    );
+    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
+    res.json(collection);
   });
 
   router.put("/:collectionId", async (req, res) => {
@@ -102,6 +125,22 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
 
   router.get("/:collectionId/items/:itemId", async (req, res) => {
     res.json(await readItem(db, req.params.collectionId, req.params.itemId));
+  });
+
+  router.get("/:collectionId/items/:itemId/versions", async (req, res) => {
+    res.json({ versions: await getItemVersions(db, req.params.collectionId, req.params.itemId) });
+  });
+
+  router.post("/:collectionId/items/:itemId/versions/:versionId/restore", async (req, res) => {
+    const item = await restoreItemVersion(
+      db,
+      req.params.collectionId,
+      req.params.itemId,
+      req.params.versionId,
+      authenticatedUserId(req),
+    );
+    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
+    res.json(item);
   });
 
   router.put("/:collectionId/items/:itemId", async (req, res) => {

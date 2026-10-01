@@ -14,6 +14,7 @@ import {
   varchar,
   text,
 } from "drizzle-orm/mysql-core";
+import type { RequestAuth, ScopedAuth } from "../validation/schemas.js";
 
 // Keep text comparisons byte-exact by creating the database with utf8mb4_0900_bin.
 // Timestamps remain ISO-8601 UTC strings so the API's ordering/comparison semantics do not change.
@@ -79,6 +80,7 @@ export const collections = mysqlTable(
       { mode: "virtual" },
     ),
     description: description("description"),
+    authConfig: json("auth_config").$type<ScopedAuth | null>().default(null),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
     deletedAt: timestamp("deleted_at"),
@@ -86,6 +88,20 @@ export const collections = mysqlTable(
     updatedBy: id("updated_by").references(() => users.id),
   },
   (t) => [uniqueIndex("collections_active_name_unique").on(t.activeNameKey)],
+);
+
+export const collectionVersions = mysqlTable(
+  "collection_versions",
+  {
+    id: id("id").primaryKey(),
+    collectionId: id("collection_id")
+      .notNull()
+      .references(() => collections.id),
+    snapshot: json("snapshot").$type<{ name: string; description: string; auth?: ScopedAuth | null }>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    createdBy: id("created_by").references(() => users.id),
+  },
+  (t) => [index("collection_versions_collection_created_idx").on(t.collectionId, t.createdAt)],
 );
 
 export const items = mysqlTable(
@@ -108,6 +124,7 @@ export const items = mysqlTable(
       { mode: "virtual" },
     ),
     description: description("description"),
+    authConfig: json("auth_config").$type<ScopedAuth | null>().default(null),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
     deletedAt: timestamp("deleted_at"),
@@ -127,6 +144,35 @@ export const items = mysqlTable(
     index("items_trash_root_idx").on(t.trashRootId),
     uniqueIndex("items_active_sibling_folder_name_unique").on(t.collectionId, t.parentKey, t.activeFolderNameKey),
   ],
+);
+
+export const itemVersions = mysqlTable(
+  "item_versions",
+  {
+    id: id("id").primaryKey(),
+    itemId: id("item_id")
+      .notNull()
+      .references(() => items.id),
+    snapshot: json("snapshot")
+      .$type<
+        | { type: "folder"; name: string; description: string; auth?: ScopedAuth | null }
+        | {
+            type: "request";
+            name: string;
+            description: string;
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+            url: string;
+            queryParams: Array<{ key: string; value: string; description: string; enabled: boolean }>;
+            headers: Array<{ key: string; value: string; description: string; enabled: boolean }>;
+            body: { type: "json" | "form-urlencoded" | "multipart" | "raw" | "graphql"; content: string } | null;
+            auth: RequestAuth;
+          }
+      >()
+      .notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    createdBy: id("created_by").references(() => users.id),
+  },
+  (t) => [index("item_versions_item_created_idx").on(t.itemId, t.createdAt)],
 );
 
 export const presenceTestUsers = mysqlTable(
@@ -159,14 +205,15 @@ export const requestDetails = mysqlTable(
       .references(() => items.id),
     method: mysqlEnum("method", ["GET", "POST", "PUT", "PATCH", "DELETE"]).notNull(),
     url: varchar("url", { length: 8192 }).notNull(),
-    bodyType: mysqlEnum("body_type", ["json"]),
+    bodyType: mysqlEnum("body_type", ["json", "form-urlencoded", "multipart", "raw", "graphql"]),
     bodyContent: mediumtext("body_content"),
-    authType: mysqlEnum("auth_type", ["none"]).notNull().default("none"),
+    authType: mysqlEnum("auth_type", ["inherit", "none", "basic", "bearer", "api-key"]).notNull().default("inherit"),
+    authConfig: json("auth_config").$type<Record<string, string> | null>(),
   },
   (t) => [
     check(
       "request_details_body_check",
-      sql`(${t.bodyType} IS NULL AND ${t.bodyContent} IS NULL) OR (${t.bodyType} = 'json' AND ${t.bodyContent} IS NOT NULL)`,
+      sql`(${t.bodyType} IS NULL AND ${t.bodyContent} IS NULL) OR (${t.bodyType} IS NOT NULL AND ${t.bodyContent} IS NOT NULL)`,
     ),
   ],
 );

@@ -22,7 +22,7 @@ describe("validation schemas", () => {
       queryParams: [],
       headers: [],
       body: null,
-      auth: { type: "none" },
+      auth: { type: "inherit" },
     });
   });
 
@@ -32,6 +32,56 @@ describe("validation schemas", () => {
       items: [{ type: "folder", name: "A", items: [{ type: "folder", name: "B" }] }],
     });
     expect(parsed.items[0]).toMatchObject({ type: "folder", items: [{ type: "folder", name: "B", items: [] }] });
+  });
+
+  it("accepts each supported request body type and preserves its content", () => {
+    for (const type of ["json", "form-urlencoded", "multipart", "raw", "graphql"] as const) {
+      const body = { type, content: "body content" };
+      expect(createItemSchema.parse({ type: "request", name: "R", method: "POST", url: "/x", body })).toMatchObject({
+        body,
+      });
+    }
+    expect(
+      createItemSchema.safeParse({
+        type: "request",
+        name: "R",
+        method: "POST",
+        url: "/x",
+        body: { type: "form", content: "a=b" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates auth methods and permits inherited or scoped overrides", () => {
+    const authModes = [
+      { type: "inherit" },
+      { type: "none" },
+      { type: "basic", username: "user", password: "secret" },
+      { type: "bearer", token: "secret" },
+      { type: "api-key", in: "header", key: "X-API-Key", value: "secret" },
+      { type: "api-key", in: "query", key: "api_key", value: "secret" },
+    ];
+    for (const auth of authModes) {
+      expect(
+        createItemSchema.parse({ type: "request", name: "R", method: "GET", url: "/x", auth }).auth,
+      ).toEqual(auth);
+    }
+
+    expect(
+      createItemSchema.safeParse({
+        type: "request",
+        name: "R",
+        method: "GET",
+        url: "/x",
+        auth: { type: "api-key", in: "cookie", key: "key", value: "secret" },
+      }).success,
+    ).toBe(false);
+    expect(
+      createCollectionSchema.safeParse({
+        name: "C",
+        auth: { type: "inherit" },
+      }).success,
+    ).toBe(false);
   });
 
   it("limits folder nesting depth", () => {

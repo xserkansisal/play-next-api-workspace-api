@@ -103,6 +103,7 @@ async function copySubtree(
         name,
         nameKey: nameKey(name),
         description: row.description,
+        authConfig: row.kind === "folder" ? row.authConfig : null,
         createdAt: timestamp,
         updatedAt: timestamp,
         // The copy is new content by whoever asked for it. Carrying the original's author over
@@ -150,6 +151,7 @@ export function cloneCollection(db: AppDatabase, id: string, actorId: string): P
       name,
       nameKey: nameKey(name),
       description: source.description,
+      authConfig: source.authConfig,
       createdAt: timestamp,
       updatedAt: timestamp,
       createdBy: actorId,

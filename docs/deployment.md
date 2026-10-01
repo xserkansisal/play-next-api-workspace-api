@@ -61,6 +61,8 @@ GRANT ALL PRIVILEGES ON play_next_api.* TO 'play_next_api'@'127.0.0.1';
 ## Configure environment and migrate
 
 Apply pending database migrations before deploying an API version that uses newly added columns.
+Migration `0007_fuzzy_risque` creates collection and item version-history tables. Existing resources
+start with empty history; subsequent successful collection and item edits create the first snapshots.
 Migration `0004_spooky_trish_tilby` adds profile-name columns with empty defaults, so the previous
 API version remains compatible during a rolling deployment. The migration backfills existing
 users from the email local part, ignores empty dot-separated pieces, and only fills blank names.

@@ -1,0 +1,3 @@
+ALTER TABLE `request_details` DROP CONSTRAINT `request_details_body_check`;--> statement-breakpoint
+ALTER TABLE `request_details` MODIFY COLUMN `body_type` enum('json','form-urlencoded','multipart','raw','graphql');--> statement-breakpoint
+ALTER TABLE `request_details` ADD CONSTRAINT `request_details_body_check` CHECK ((`request_details`.`body_type` IS NULL AND `request_details`.`body_content` IS NULL) OR (`request_details`.`body_type` IS NOT NULL AND `request_details`.`body_content` IS NOT NULL));

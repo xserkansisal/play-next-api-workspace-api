@@ -31,17 +31,54 @@ export const keyValueRowSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
 
-// Content is stored verbatim: it may contain {{variables}} that only become valid JSON
-// after substitution, so parseability is checked by the client before sending.
+// Content is stored verbatim so the client can substitute {{variables}} before sending.
 export const requestBodySchema = z
   .strictObject({
-    type: z.literal("json"),
+    type: z.enum(["json", "form-urlencoded", "multipart", "raw", "graphql"]),
     content: z.string().max(MAX_BODY_LENGTH),
   })
   .nullable()
   .default(null);
 
-export const authSchema = z.strictObject({ type: z.literal("none") }).default({ type: "none" });
+const authUsernameSchema = z.string().max(MAX_ROW_TEXT_LENGTH);
+const authSecretSchema = z.string().max(MAX_ROW_TEXT_LENGTH);
+
+export const requestAuthSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("inherit") }),
+  z.strictObject({ type: z.literal("none") }),
+  z.strictObject({
+    type: z.literal("basic"),
+    username: authUsernameSchema,
+    password: authSecretSchema,
+  }),
+  z.strictObject({ type: z.literal("bearer"), token: authSecretSchema }),
+  z.strictObject({
+    type: z.literal("api-key"),
+    in: z.enum(["header", "query"]),
+    key: authUsernameSchema.min(1),
+    value: authSecretSchema,
+  }),
+]);
+export type RequestAuth = z.output<typeof requestAuthSchema>;
+
+export const scopedAuthSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("none") }),
+  z.strictObject({
+    type: z.literal("basic"),
+    username: authUsernameSchema,
+    password: authSecretSchema,
+  }),
+  z.strictObject({ type: z.literal("bearer"), token: authSecretSchema }),
+  z.strictObject({
+    type: z.literal("api-key"),
+    in: z.enum(["header", "query"]),
+    key: authUsernameSchema.min(1),
+    value: authSecretSchema,
+  }),
+]);
+export type ScopedAuth = z.output<typeof scopedAuthSchema>;
+
+export const authSchema = requestAuthSchema.default({ type: "inherit" });
 
 const requestFields = {
   name: nameSchema,
@@ -57,6 +94,7 @@ const requestFields = {
 const folderFields = {
   name: nameSchema,
   description: descriptionSchema,
+  auth: scopedAuthSchema.nullable().optional(),
 };
 
 export const requestItemFieldsSchema = z.strictObject({ type: z.literal("request"), ...requestFields });
@@ -109,6 +147,7 @@ export const createCollectionSchema = z
   .strictObject({
     name: nameSchema,
     description: descriptionSchema,
+    auth: scopedAuthSchema.nullable().default(null),
     items: z.array(treeNodeSchema).default([]),
   })
   .refine((value) => treeDepth(value.items) <= MAX_TREE_DEPTH, {
@@ -163,6 +202,7 @@ export function measureImportShape(body: unknown, limits = { nodes: MAX_IMPORT_N
 export const updateCollectionSchema = z.strictObject({
   name: nameSchema,
   description: descriptionSchema,
+  auth: scopedAuthSchema.nullable().optional(),
 });
 export type UpdateCollectionInput = z.output<typeof updateCollectionSchema>;
 

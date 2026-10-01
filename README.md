@@ -93,12 +93,16 @@ Scoped variables retain one key per user and one global value per key.
 | POST | `/api/v1/collections` | Create a collection, optionally with a nested `items` tree (atomic) |
 | GET | `/api/v1/collections/:id` | Collection with its active item tree |
 | PUT | `/api/v1/collections/:id` | Save name/description only |
+| GET | `/api/v1/collections/:id/versions` | List saved collection metadata versions |
+| POST | `/api/v1/collections/:id/versions/:versionId/restore` | Restore collection metadata from a version |
 | DELETE | `/api/v1/collections/:id` | Move collection and its items to Trash |
 | POST | `/api/v1/collections/:id/clone` | Copy the collection and its whole active tree under a free name |
 | POST | `/api/v1/collections/:id/import` | Bulk-import a tree of folders and requests at the root or beneath a folder |
 | POST | `/api/v1/collections/:id/items` | Create a `folder` or `request` (optional `parentId`) |
 | GET | `/api/v1/collections/:id/items/:itemId` | Read one item (folders include their subtree) |
 | PUT | `/api/v1/collections/:id/items/:itemId` | Save one item's own fields; never rewrites the tree |
+| GET | `/api/v1/collections/:id/items/:itemId/versions` | List saved versions of one item's own fields |
+| POST | `/api/v1/collections/:id/items/:itemId/versions/:versionId/restore` | Restore one item's fields from a version |
 | DELETE | `/api/v1/collections/:id/items/:itemId` | Move item (and descendants) to Trash |
 | POST | `/api/v1/collections/:id/items/:itemId/clone` | Copy a folder (with its subtree) or a request, beside the original |
 | POST | `/api/v1/collections/:id/items/:itemId/move` | Reparent a folder (with its subtree) or a request, within or across collections |
@@ -113,6 +117,15 @@ Scoped variables retain one key per user and one global value per key.
 | POST | `/api/v1/variables/:scope` | Create-only scoped variable. Body: `{ "key": string, "value": string }`; duplicate keys return `409` |
 | DELETE | `/api/v1/variables/:scope/:key` | Forget one variable at that scope |
 | POST | `/api/v1/environments/:id/variables` | Append one variable row to an environment; enabled-key conflicts return `409` |
+
+Request bodies are either `null` or `{ "type": "json" | "form-urlencoded" | "multipart" | "raw" | "graphql", "content": string }`.
+See [frontend request body integration](docs/frontend-request-body-types.md) for payload examples,
+proxy execution guidance, and the current multipart limitation. Content is stored verbatim (up to
+1,000,000 characters); the API does not parse, encode, or validate it for the selected type.
+See [frontend authentication integration](docs/frontend-authentication.md) for Basic, Bearer, API
+Key, and collection/folder inheritance behavior.
+See [frontend version history integration](docs/frontend-version-history.md) for history and restore
+response formats and behavior.
 | GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
 | PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
 | PUT | `/api/v1/presence` | Refresh or clear the current browser tab's collection/folder/request location |

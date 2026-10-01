@@ -16,11 +16,18 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { collections, items, requestDetails, requestHeaders, requestQueryParams } from "../db/schema.js";
 import { BadRequestError, ConflictError } from "../errors.js";
-import { MAX_TREE_DEPTH, treeDepth, type ImportItemsInput, type RequestItemFields, type TreeNodeInput } from "../validation/schemas.js";
+import {
+  MAX_TREE_DEPTH,
+  treeDepth,
+  type ImportItemsInput,
+  type RequestAuth,
+  type RequestItemFields,
+  type TreeNodeInput,
+} from "../validation/schemas.js";
 import { requireActiveCollection } from "./collections.js";
 import { nameKey, newId, nowIso } from "./common.js";
 import { copyName } from "./copyName.js";
-import { findActiveItem, type DbExecutor } from "./tree.js";
+import { authConfigForStorage, findActiveItem, type DbExecutor } from "./tree.js";
 
 export interface ImportRenamed {
   path: string[];
@@ -28,11 +35,9 @@ export interface ImportRenamed {
   to: string;
 }
 
-export interface ImportWarning {
-  path: string[];
-  code: "SENSITIVE_HEADER";
-  header: string;
-}
+export type ImportWarning =
+  | { path: string[]; code: "SENSITIVE_HEADER"; header: string }
+  | { path: string[]; code: "SENSITIVE_AUTH"; authType: "basic" | "bearer" | "api-key" };
 
 export interface ImportedRoot {
   id: string;
@@ -110,6 +115,23 @@ function collectWarnings(nodes: TreeNodeInput[], path: string[], out: ImportWarn
         out.push({ path: nodePath, code: "SENSITIVE_HEADER", header: header.key.trim() });
       }
     }
+    if (hasUnresolvedAuthSecret(node.auth)) {
+      out.push({ path: nodePath, code: "SENSITIVE_AUTH", authType: node.auth.type });
+    }
+  }
+}
+
+function hasUnresolvedAuthSecret(auth: RequestAuth): auth is Extract<RequestAuth, { type: "basic" | "bearer" | "api-key" }> {
+  switch (auth.type) {
+    case "basic":
+      return auth.password.trim() !== "" && !PLACEHOLDER_ONLY.test(auth.password);
+    case "bearer":
+      return auth.token.trim() !== "" && !PLACEHOLDER_ONLY.test(auth.token);
+    case "api-key":
+      return auth.value.trim() !== "" && !PLACEHOLDER_ONLY.test(auth.value);
+    case "inherit":
+    case "none":
+      return false;
   }
 }
 
@@ -159,6 +181,7 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
         name: row.name,
         nameKey: nameKey(row.name),
         description: row.node.description,
+        authConfig: row.node.type === "folder" ? row.node.auth ?? null : null,
         createdAt: timestamp,
         updatedAt: timestamp,
         createdBy: actorId,
@@ -177,6 +200,7 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
         bodyType: node.body ? node.body.type : null,
         bodyContent: node.body ? node.body.content : null,
         authType: node.auth.type,
+        authConfig: authConfigForStorage(node.auth),
       })),
     );
   }
@@ -272,4 +296,3 @@ export function importItems(db: AppDatabase, collectionId: string, input: Import
     return { ...base, roots };
   });
 }
-

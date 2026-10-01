@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { items } from "../db/schema.js";
 import { BadRequestError, NotFoundError } from "../errors.js";
@@ -15,6 +15,7 @@ import {
   type DbExecutor,
   type ItemNode,
 } from "./tree.js";
+import { findItemVersion, listItemVersions, recordItemVersion } from "./versions.js";
 
 export async function readItem(db: DbExecutor, collectionId: string, itemId: string): Promise<ItemNode> {
   await requireActiveCollection(db, collectionId);
@@ -23,8 +24,62 @@ export async function readItem(db: DbExecutor, collectionId: string, itemId: str
   return node;
 }
 
+export async function getItemVersions(db: AppDatabase, collectionId: string, itemId: string) {
+  await requireActiveCollection(db, collectionId);
+  await requireActiveItem(db, collectionId, itemId);
+  return listItemVersions(db, itemId);
+}
+
+export function restoreItemVersion(
+  db: AppDatabase,
+  collectionId: string,
+  itemId: string,
+  versionId: string,
+  actorId: string,
+): Promise<ItemNode> {
+  return db.transaction(async (tx) => {
+    const row = await lockActiveItem(tx, collectionId, itemId);
+    await requireActiveCollection(tx, collectionId);
+    const current = await readItem(tx, collectionId, itemId);
+    const version = await findItemVersion(tx, itemId, versionId);
+    const snapshot = version.snapshot;
+    if (snapshot.type !== row.kind) throw new Error(`Item version ${versionId} has a mismatched item type`);
+
+    if (snapshot.type === "folder") {
+      const existing = await findActiveSiblingFolder(tx, collectionId, row.parentId, snapshot.name, itemId);
+      if (existing) throw folderConflictError(snapshot.name, row.parentId, existing.id);
+    }
+
+    await recordItemVersion(tx, current, actorId);
+    await tx
+      .update(items)
+      .set({
+        name: snapshot.name,
+        nameKey: nameKey(snapshot.name),
+        description: snapshot.description,
+        ...(snapshot.type === "folder" ? { authConfig: snapshot.auth ?? null } : {}),
+        updatedAt: nowIso(),
+        updatedBy: actorId,
+      })
+      .where(eq(items.id, itemId));
+    if (snapshot.type === "request") await writeRequestDetails(tx, itemId, snapshot, false);
+    return readItem(tx, collectionId, itemId);
+  });
+}
+
 async function requireActiveItem(db: DbExecutor, collectionId: string, itemId: string) {
   const row = await findActiveItem(db, collectionId, itemId);
+  if (!row) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
+  return row;
+}
+
+async function lockActiveItem(db: DbExecutor, collectionId: string, itemId: string) {
+  const [row] = await db
+    .select()
+    .from(items)
+    .where(and(eq(items.id, itemId), eq(items.collectionId, collectionId), isNull(items.deletedAt)))
+    .limit(1)
+    .for("update");
   if (!row) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
   return row;
 }
@@ -58,6 +113,7 @@ export function createItem(db: AppDatabase, collectionId: string, input: CreateI
           name: input.name,
           nameKey: nameKey(input.name),
           description: input.description,
+          authConfig: input.type === "folder" ? input.auth ?? null : null,
           createdAt: timestamp,
           updatedAt: timestamp,
           createdBy: actorId,
@@ -78,8 +134,8 @@ export function updateItem(
   actorId: string,
 ): Promise<ItemNode> {
   return db.transaction(async (tx) => {
+      const row = await lockActiveItem(tx, collectionId, itemId);
       await requireActiveCollection(tx, collectionId);
-      const row = await requireActiveItem(tx, collectionId, itemId);
       if (row.kind !== input.type) {
         throw new BadRequestError(`Item ${itemId} is a ${row.kind}, not a ${input.type}`, "ITEM_TYPE_MISMATCH", {
           expected: row.kind,
@@ -91,6 +147,7 @@ export function updateItem(
         if (existing) throw folderConflictError(input.name, row.parentId, existing.id);
       }
 
+      await recordItemVersion(tx, await readItem(tx, collectionId, itemId), actorId);
       await tx.update(items)
         .set({
           name: input.name,
@@ -98,6 +155,7 @@ export function updateItem(
           description: input.description,
           updatedAt: nowIso(),
           updatedBy: actorId,
+          ...(input.type === "folder" && input.auth !== undefined ? { authConfig: input.auth } : {}),
         })
         .where(eq(items.id, itemId))
         ;

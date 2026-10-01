@@ -35,6 +35,17 @@ describe("collection items API", () => {
       body: { type: "json", content: '{"id": {{id}}}' },
     });
 
+    it("persists and returns each supported request body type", async () => {
+      for (const type of ["form-urlencoded", "multipart", "raw", "graphql"] as const) {
+        const body = { type, content: `content for ${type}` };
+        const request = await createRequest(`Request ${type}`, null, { body });
+        expect(request.body).toEqual(body);
+
+        const read = await ctx.api.get(`${itemsUrl()}/${request.id}`).expect(200);
+        expect(read.body.body).toEqual(body);
+      }
+    });
+
     expect(req).toMatchObject({
       type: "request",
       collectionId,
@@ -45,7 +56,7 @@ describe("collection items API", () => {
         { key: "a", value: "1", description: "", enabled: true },
       ],
       body: { type: "json", content: '{"id": {{id}}}' },
-      auth: { type: "none" },
+      auth: { type: "inherit" },
     });
 
     const readFolder = await ctx.api.get(`${itemsUrl()}/${folder.id}`).expect(200);
@@ -115,6 +126,43 @@ describe("collection items API", () => {
     const folderAfter = after.items[0];
     expect(folderAfter.updatedAt).toBe(folder.updatedAt);
     expect(folderAfter.items.find((i: { id: string }) => i.id === b.id)).toEqual(b);
+  });
+
+  it("persists auth methods and resolves collection, folder, and request overrides", async () => {
+    await ctx.api
+      .put(`/api/v1/collections/${collectionId}`)
+      .send({ name: "Main", description: "", auth: { type: "bearer", token: "collection-token" } })
+      .expect(200);
+
+    const folder = (
+      await ctx.api.post(itemsUrl()).send({ type: "folder", name: "Scoped" }).expect(201)
+    ).body;
+    expect(folder.auth).toBeNull();
+
+    const inherited = await createRequest("Inherited", folder.id);
+    expect(inherited.auth).toEqual({ type: "inherit" });
+    expect(inherited.effectiveAuth).toEqual({ type: "bearer", token: "collection-token" });
+
+    const folderAuth = (
+      await ctx.api
+        .put(`${itemsUrl()}/${folder.id}`)
+        .send({ type: "folder", name: "Scoped", auth: { type: "basic", username: "team", password: "folder-secret" } })
+        .expect(200)
+    ).body;
+    expect(folderAuth.auth).toEqual({ type: "basic", username: "team", password: "folder-secret" });
+    expect(folderAuth.items[0].effectiveAuth).toEqual({ type: "basic", username: "team", password: "folder-secret" });
+
+    const noneFolder = (
+      await ctx.api.post(itemsUrl()).send({ type: "folder", name: "No auth", auth: { type: "none" } }).expect(201)
+    ).body;
+    const disabled = await createRequest("Disabled", noneFolder.id);
+    expect(disabled.effectiveAuth).toEqual({ type: "none" });
+
+    const apiKey = await createRequest("API key", folder.id, {
+      auth: { type: "api-key", in: "query", key: "api_key", value: "request-secret" },
+    });
+    expect(apiKey.effectiveAuth).toEqual({ type: "api-key", in: "query", key: "api_key", value: "request-secret" });
+    expect((await ctx.api.get(`${itemsUrl()}/${apiKey.id}`).expect(200)).body.auth).toEqual(apiKey.auth);
   });
 
   it("saving a folder does not rewrite its children", async () => {
