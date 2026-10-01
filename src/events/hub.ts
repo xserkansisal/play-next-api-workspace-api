@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 export type ChangeResourceKind = "collection" | "folder" | "request" | "environment" | "variable";
-export type ChangeOperation = "created" | "updated" | "trashed" | "restored";
+export type ChangeOperation = "created" | "updated" | "trashed" | "restored" | "move";
 
 /**
  * Value-free notification that a shared resource changed. It never carries resource

@@ -253,8 +253,7 @@ export async function insertTree(
 }
 
 /** Returns the IDs of `itemId` and all its active descendants. */
-export async function activeSubtreeIds(db: DbExecutor, itemId: string): Promise<string[]> {
-  const root = await first(
+export async function activeSubtreeIds(db: DbExecutor, itemId: string): Promise<string[]> {  const root = await first(
     db.select({ id: items.id }).from(items).where(and(eq(items.id, itemId), isNull(items.deletedAt))).limit(1),
   );
   if (!root) return [];
@@ -266,6 +265,24 @@ export async function activeSubtreeIds(db: DbExecutor, itemId: string): Promise<
       .select({ id: items.id })
       .from(items)
       .where(and(inArray(items.parentId, parents), isNull(items.deletedAt)));
+    parents = children.map((row) => row.id);
+    ids.push(...parents);
+  }
+  return ids;
+}
+
+/**
+ * Returns the IDs of `itemId` and every descendant, trashed ones included.
+ *
+ * A move has to carry the whole branch: the parent-and-collection foreign key is blind to
+ * `deleted_at`, so a trashed descendant left behind in the old collection would both break the
+ * write and, if it somehow survived, restore into a collection its ancestors have left.
+ */
+export async function wholeSubtreeIds(db: DbExecutor, itemId: string): Promise<string[]> {
+  const ids = [itemId];
+  let parents = [itemId];
+  while (parents.length > 0) {
+    const children = await db.select({ id: items.id }).from(items).where(inArray(items.parentId, parents));
     parents = children.map((row) => row.id);
     ids.push(...parents);
   }

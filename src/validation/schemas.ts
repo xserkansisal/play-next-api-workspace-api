@@ -74,6 +74,12 @@ export type CreateItemInput = z.output<typeof createItemSchema>;
 export const updateItemSchema = z.discriminatedUnion("type", [folderItemFieldsSchema, requestItemFieldsSchema]);
 export type UpdateItemInput = z.output<typeof updateItemSchema>;
 
+export const moveItemSchema = z.strictObject({
+  targetCollectionId: idSchema,
+  parentId: idSchema.nullable(),
+});
+export type MoveItemInput = z.output<typeof moveItemSchema>;
+
 export type TreeNodeInput = RequestItemFields | (FolderItemFields & { items: TreeNodeInput[] });
 
 const treeRequestSchema = requestItemFieldsSchema;

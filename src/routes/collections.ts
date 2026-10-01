@@ -5,9 +5,11 @@ import { authenticatedUserId } from "../middleware/authenticate.js";
 import { createCollection, listCollections, readCollection, trashCollection, updateCollection } from "../services/collections.js";
 import { cloneCollection, cloneItem } from "../services/clone.js";
 import { createItem, readItem, trashItem, updateItem } from "../services/items.js";
+import { moveItem } from "../services/move.js";
 import {
   createCollectionSchema,
   createItemSchema,
+  moveItemSchema,
   updateCollectionSchema,
   updateItemSchema,
 } from "../validation/schemas.js";
@@ -67,6 +69,23 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub)
     const item = await cloneItem(db, req.params.collectionId, req.params.itemId, authenticatedUserId(req));
     events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
     res.status(201).json(item);
+  });
+
+  router.post("/:collectionId/items/:itemId/move", async (req, res) => {
+    const { item, sourceCollectionId } = await moveItem(
+      db,
+      req.params.collectionId,
+      req.params.itemId,
+      moveItemSchema.parse(req.body),
+      authenticatedUserId(req),
+    );
+    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "move", changedAt: item.updatedAt });
+    // A move across collections changes two trees. A tab showing only the source would otherwise
+    // keep the item under its old parent until something else made it refetch.
+    if (sourceCollectionId !== item.collectionId) {
+      events.publish({ kind: item.type, id: item.id, collectionId: sourceCollectionId, operation: "move", changedAt: item.updatedAt });
+    }
+    res.json(item);
   });
 
   router.delete("/:collectionId/items/:itemId", async (req, res) => {

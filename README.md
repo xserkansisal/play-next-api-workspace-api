@@ -98,6 +98,7 @@ Scoped variables retain one key per user and one global value per key.
 | PUT | `/api/v1/collections/:id/items/:itemId` | Save one item's own fields; never rewrites the tree |
 | DELETE | `/api/v1/collections/:id/items/:itemId` | Move item (and descendants) to Trash |
 | POST | `/api/v1/collections/:id/items/:itemId/clone` | Copy a folder (with its subtree) or a request, beside the original |
+| POST | `/api/v1/collections/:id/items/:itemId/move` | Reparent a folder (with its subtree) or a request, within or across collections |
 | GET/POST | `/api/v1/environments` | List / create environments |
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
@@ -169,6 +170,39 @@ than nesting markers. Only the root is renamed: everything below it moves to a n
 its own name cannot collide. A cloned item keeps its source's parent so the copy appears next to
 the original, and the copy is attributed to whoever asked for it, not the original author.
 Trashed rows are left behind.
+
+## Moving an item
+
+`POST /api/v1/collections/:id/items/:itemId/move` takes
+`{ "targetCollectionId": string, "parentId": string | null }` and returns the moved item with its
+subtree in its new position. `parentId` is the destination folder, or `null` for the collection
+root.
+
+This is a reparent, never a reorder. Siblings are returned folder-agnostic and alphabetical, and
+no sibling index is stored, so there is nothing a drop *between* two rows could persist. Manual
+ordering would need a persisted position on every item and is deliberately out of scope.
+
+The whole subtree moves in one transaction, trashed descendants included: the parent reference is
+a foreign key on `(parent_id, collection_id)` that does not look at `deleted_at`, so a trashed
+child left behind would both break the write and later restore into a collection its ancestors
+have left. For the same reason a cross-collection move suspends that key for the duration of the
+rewrite - there is no order in which a subtree can change collection one row at a time - and
+restores it before the connection goes back to the pool. The sibling-folder-name index is never
+suspended and remains the last word on uniqueness.
+
+Rejections, all of which the client also blocks during the drag, so only a stale tab reaches them:
+
+| Condition | Status | Code |
+|---|---|---|
+| The item, or the collection it is named in, does not exist | `404` | `ITEM_NOT_FOUND` |
+| `targetCollectionId` or `parentId` does not exist | `404` | `TARGET_NOT_FOUND` |
+| `parentId` is the item, a descendant of it, or a request | `409` | `INVALID_MOVE` |
+| A sibling folder in the destination already has that name | `409` | `NAME_CONFLICT` |
+
+Name conflicts apply to folders only; sibling requests may share a name, as they may anywhere
+else. A move emits a `move` change event carrying the item's new `collectionId`, and a second one
+for the source collection when the two differ, so a tab watching only the old collection stops
+showing the item under its old parent.
 
 ## Email code sign-in
 
@@ -294,9 +328,10 @@ data: {"eventId":"<epoch>:42","kind":"request","id":"<itemId>","collectionId":"<
 ```
 
 - `kind`: `collection` | `folder` | `request` | `environment`; `operation`: `created` |
-  `updated` | `trashed` | `restored`; `collectionId` is the owning collection for folders/requests and `null` for
+  `updated` | `trashed` | `restored` | `move`; `collectionId` is the owning collection for folders/requests and `null` for
   collections and environments. Payloads never include names, URLs, headers, query params, bodies or
-  environment variable values. A subtree trash or restore emits one event for its root.
+  environment variable values. A subtree trash or restore emits one event for its root, and so does
+  a move - except across collections, which emits one for the destination and one for the source.
 - **Heartbeat:** a `: heartbeat` comment every `SSE_HEARTBEAT_MS` keeps proxies from timing out
   idle connections.
 - **Reconnect:** `retry:` sets the browser `EventSource` reconnect delay. On reconnect the
