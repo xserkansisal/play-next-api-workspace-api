@@ -21,6 +21,31 @@ async function snapshot() {
 }
 
 describe("persistence across reopen", () => {
+  it("keeps each user's variable display order in MySQL across pool reopen", async () => {
+    const tmp = createTempDir();
+    const path = join(tmp.dir, "nested", "variable-order.sqlite");
+    try {
+      const first = await createTestContext(path);
+      await first.api
+        .put("/api/v1/variables/order")
+        .send({ order: ["environmentOnly", "token"] })
+        .expect(200);
+      await first.close();
+
+      const second = await createTestContext(path);
+      try {
+        expect((await second.api.get("/api/v1/variables/order").expect(200)).body).toEqual({
+          order: ["environmentOnly", "token"],
+        });
+      } finally {
+        await second.close();
+      }
+    } finally {
+      await dropTestDatabase(path);
+      tmp.cleanup();
+    }
+  });
+
   it("keeps collections, items, environments, and Trash state in MySQL across pool reopen", async () => {
     const tmp = createTempDir();
     const path = join(tmp.dir, "nested", "api.sqlite");

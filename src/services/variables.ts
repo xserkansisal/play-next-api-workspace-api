@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { variables } from "../db/schema.js";
+import { variableDisplayOrders, variables } from "../db/schema.js";
 import { NotFoundError } from "../errors.js";
 import { newId, nowIso } from "./common.js";
 
@@ -65,6 +65,27 @@ export async function listVariables(db: AppDatabase, userId: string): Promise<Sc
     db.select().from(variables).where(eq(variables.scope, "global")).orderBy(asc(variables.key)),
   ]);
   return [...rows, ...globals].map(toScopedVariable);
+}
+
+export async function getVariableDisplayOrder(db: AppDatabase, userId: string): Promise<string[]> {
+  const [preference] = await db
+    .select({ order: variableDisplayOrders.order })
+    .from(variableDisplayOrders)
+    .where(eq(variableDisplayOrders.userId, userId))
+    .limit(1);
+  return preference?.order ?? [];
+}
+
+export async function setVariableDisplayOrder(
+  db: AppDatabase,
+  userId: string,
+  order: string[],
+): Promise<string[]> {
+  await db
+    .insert(variableDisplayOrders)
+    .values({ userId, order })
+    .onDuplicateKeyUpdate({ set: { order } });
+  return order;
 }
 
 /**

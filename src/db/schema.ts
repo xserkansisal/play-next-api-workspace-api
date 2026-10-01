@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   int,
+  json,
   mediumtext,
   mysqlEnum,
   mysqlTable,
@@ -235,3 +236,10 @@ export const variables = mysqlTable(
     uniqueIndex("variables_global_key_unique").on(t.globalScopedKey),
   ],
 );
+
+export const variableDisplayOrders = mysqlTable("variable_display_orders", {
+  userId: id("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  order: json("order").$type<string[]>().notNull(),
+});

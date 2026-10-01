@@ -136,6 +136,25 @@ export const variableInputSchema = z.strictObject({
 });
 export type VariableInput = z.output<typeof variableInputSchema>;
 
+export const variableDisplayOrderSchema = z
+  .strictObject({
+    order: z.array(variableKeySchema),
+  })
+  .superRefine(({ order }, ctx) => {
+    const seen = new Set<string>();
+    order.forEach((key, index) => {
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Duplicate variable key "${key}"`,
+          path: ["order", index],
+        });
+      }
+      seen.add(key);
+    });
+  });
+export type VariableDisplayOrderInput = z.output<typeof variableDisplayOrderSchema>;
+
 export const environmentInputSchema = z
   .strictObject({
     name: nameSchema,

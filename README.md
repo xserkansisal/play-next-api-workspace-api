@@ -102,6 +102,8 @@ Scoped variables retain one key per user and one global value per key.
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
 | GET | `/api/v1/variables` | This user's own variables plus every global one |
+| GET | `/api/v1/variables/order` | Read this user's saved display order of variable names |
+| PUT | `/api/v1/variables/order` | Replace this user's display order. Body: `{ "order": string[] }` |
 | PUT | `/api/v1/variables/:scope/:key` | Save a value at `user` or `global` scope. Body: `{ "value": string }` |
 | DELETE | `/api/v1/variables/:scope/:key` | Forget one variable at that scope |
 | GET | `/api/v1/trash` | Restorable deleted roots (`kind`, `deletedAt`) |
@@ -140,6 +142,11 @@ applies: no whitespace, no braces.
 Only a **global** write is announced over SSE. A personal value concerns one person, and
 broadcasting it would make every other client refetch for nothing while telling the whole team
 which keys that person holds.
+
+Display order is an independent per-user preference. Its complete list of names may include
+variables from an environment selected in the client, and does not create, update, or delete
+variable values. Names follow the same key rule (non-empty, at most 200 characters, no whitespace
+or braces), and duplicates are rejected; an empty order is valid.
 
 Values are stored in plain text, exactly as environment variables already are. Nothing here makes
 a secret safer than it is in an environment.

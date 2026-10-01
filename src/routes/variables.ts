@@ -2,14 +2,29 @@ import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import { authenticatedUserId } from "../middleware/authenticate.js";
-import { deleteVariable, listVariables, setVariable } from "../services/variables.js";
-import { variableInputSchema, variableKeySchema, variableScopeSchema } from "../validation/schemas.js";
+import {
+  deleteVariable,
+  getVariableDisplayOrder,
+  listVariables,
+  setVariable,
+  setVariableDisplayOrder,
+} from "../services/variables.js";
+import { variableDisplayOrderSchema, variableInputSchema, variableKeySchema, variableScopeSchema } from "../validation/schemas.js";
 
 export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
   router.get("/", async (req, res) => {
     res.json({ variables: await listVariables(db, authenticatedUserId(req)) });
+  });
+
+  router.get("/order", async (req, res) => {
+    res.json({ order: await getVariableDisplayOrder(db, authenticatedUserId(req)) });
+  });
+
+  router.put("/order", async (req, res) => {
+    const { order } = variableDisplayOrderSchema.parse(req.body);
+    res.json({ order: await setVariableDisplayOrder(db, authenticatedUserId(req), order) });
   });
 
   router.put("/:scope/:key", async (req, res) => {
