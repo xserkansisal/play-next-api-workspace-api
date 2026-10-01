@@ -95,6 +95,10 @@ Scoped variables retain one key per user and one global value per key.
 | PUT | `/api/v1/collections/:id` | Save name/description only |
 | GET | `/api/v1/collections/:id/versions` | List saved collection metadata versions |
 | POST | `/api/v1/collections/:id/versions/:versionId/restore` | Restore collection metadata from a version |
+| POST | `/api/v1/collections/:id/run` | Run all active requests in sequence |
+| POST | `/api/v1/collections/:id/items/:itemId/run` | Run requests beneath one folder |
+| GET | `/api/v1/collections/:id/runs` | List this user's run history |
+| GET | `/api/v1/collections/:id/runs/:runId` | Read this user's run and per-request results |
 | DELETE | `/api/v1/collections/:id` | Move collection and its items to Trash |
 | POST | `/api/v1/collections/:id/clone` | Copy the collection and its whole active tree under a free name |
 | POST | `/api/v1/collections/:id/import` | Bulk-import a tree of folders and requests at the root or beneath a folder |
@@ -126,6 +130,8 @@ See [frontend authentication integration](docs/frontend-authentication.md) for B
 Key, and collection/folder inheritance behavior.
 See [frontend version history integration](docs/frontend-version-history.md) for history and restore
 response formats and behavior.
+See [frontend collection runner integration](docs/frontend-collection-runner.md) for scripts,
+sequential variable chaining, run results, and history.
 | GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
 | PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
 | PUT | `/api/v1/presence` | Refresh or clear the current browser tab's collection/folder/request location |

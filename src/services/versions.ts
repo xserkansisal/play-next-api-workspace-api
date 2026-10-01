@@ -21,6 +21,8 @@ function itemSnapshot(item: ItemNode): ItemVersionSnapshot {
     headers: item.headers,
     body: item.body,
     auth: item.auth,
+    preRequestScript: item.preRequestScript,
+    postResponseScript: item.postResponseScript,
   };
 }
 

@@ -60,6 +60,8 @@ describe("version history API", () => {
           auth: { type: "bearer", token: "before-token" },
           headers: [{ key: "X-Test", value: "old", enabled: false }],
           body: { type: "json", content: '{"version":1}' },
+          preRequestScript: `pm.request.url += "/before";`,
+          postResponseScript: `pm.test("old assertion", () => pm.expect(pm.response.code).to.eql(200));`,
         })
         .expect(201)
     ).body;
@@ -86,6 +88,8 @@ describe("version history API", () => {
       headers: [{ key: "X-Test", value: "old", description: "", enabled: false }],
       body: { type: "json", content: '{"version":1}' },
       auth: { type: "bearer", token: "before-token" },
+      preRequestScript: `pm.request.url += "/before";`,
+      postResponseScript: `pm.test("old assertion", () => pm.expect(pm.response.code).to.eql(200));`,
     });
 
     const restored = await ctx.api
@@ -101,6 +105,8 @@ describe("version history API", () => {
       headers: [{ key: "X-Test", value: "old", description: "", enabled: false }],
       body: { type: "json", content: '{"version":1}' },
       auth: { type: "bearer", token: "before-token" },
+      preRequestScript: `pm.request.url += "/before";`,
+      postResponseScript: `pm.test("old assertion", () => pm.expect(pm.response.code).to.eql(200));`,
     });
 
     const afterRestore = await ctx.api.get(`/api/v1/collections/${collectionId}/items/${request.id}/versions`).expect(200);

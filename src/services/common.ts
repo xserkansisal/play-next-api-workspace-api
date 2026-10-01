@@ -11,6 +11,21 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function truncateUtf8(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return { text: value, truncated: false };
+
+  let end = maxBytes;
+  let start = end - 1;
+  while (start >= 0 && (bytes[start]! & 0xc0) === 0x80) start -= 1;
+  if (start >= 0) {
+    const lead = bytes[start]!;
+    const sequenceLength = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+    if (start + sequenceLength > end) end = start;
+  }
+  return { text: bytes.subarray(0, end).toString("utf8"), truncated: true };
+}
+
 export async function resolveAttribution(
   db: DbExecutor,
   createdBy: string | null,

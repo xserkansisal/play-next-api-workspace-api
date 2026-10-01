@@ -27,6 +27,7 @@
     "express": "^5.2.1",
     "mysql2": "^3.24.5",
     "nodemailer": "^10.0.12",
+    "quickjs-emscripten": "^0.32.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

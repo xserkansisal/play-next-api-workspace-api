@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   createCollectionSchema,
   createItemSchema,
+  collectionRunSchema,
   environmentInputSchema,
+  requestItemFieldsSchema,
   restoreSchema,
+  runHistoryQuerySchema,
   variableDisplayOrderSchema,
   variableOrderPreferencesSchema,
 } from "../../src/validation/schemas.js";
@@ -23,6 +26,8 @@ describe("validation schemas", () => {
       headers: [],
       body: null,
       auth: { type: "inherit" },
+      preRequestScript: "",
+      postResponseScript: "",
     });
   });
 
@@ -40,6 +45,7 @@ describe("validation schemas", () => {
       expect(createItemSchema.parse({ type: "request", name: "R", method: "POST", url: "/x", body })).toMatchObject({
         body,
       });
+
     }
     expect(
       createItemSchema.safeParse({
@@ -50,6 +56,31 @@ describe("validation schemas", () => {
         body: { type: "form", content: "a=b" },
       }).success,
     ).toBe(false);
+  });
+
+  it("validates request scripts and runner options", () => {
+    const request = requestItemFieldsSchema.parse({
+      type: "request",
+      name: "R",
+      method: "GET",
+      url: "/x",
+      preRequestScript: "pm.request.url += '/v2';",
+      postResponseScript: "pm.test('ok', () => pm.expect(pm.response.code).to.eql(200));",
+    });
+    expect(request.preRequestScript).toContain("/v2");
+    expect(request.postResponseScript).toContain("pm.test");
+    expect(requestItemFieldsSchema.safeParse({
+      type: "request",
+      name: "R",
+      method: "GET",
+      url: "/x",
+      preRequestScript: "x".repeat(32_769),
+    }).success).toBe(false);
+
+    expect(collectionRunSchema.parse({})).toEqual({});
+    expect(collectionRunSchema.safeParse({ unknown: true }).success).toBe(false);
+    expect(runHistoryQuerySchema.parse({ limit: "10", offset: "20" })).toEqual({ limit: 10, offset: 20 });
+    expect(runHistoryQuerySchema.safeParse({ limit: "101" }).success).toBe(false);
   });
 
   it("validates auth methods and permits inherited or scoped overrides", () => {

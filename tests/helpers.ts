@@ -180,4 +180,6 @@ export const requestFields = {
   headers: [],
   body: null,
   auth: { type: "inherit" },
+  preRequestScript: "",
+  postResponseScript: "",
 };

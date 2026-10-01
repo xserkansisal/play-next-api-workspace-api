@@ -201,6 +201,8 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
         bodyContent: node.body ? node.body.content : null,
         authType: node.auth.type,
         authConfig: authConfigForStorage(node.auth),
+        preRequestScript: node.preRequestScript,
+        postResponseScript: node.postResponseScript,
       })),
     );
   }

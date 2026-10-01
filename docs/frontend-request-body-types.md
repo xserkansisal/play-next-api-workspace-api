@@ -70,6 +70,9 @@ the boundary in the generated body.
 The API does not perform any of these transformations or automatically add a `Content-Type`
 header. It sends the proxy payload's body string as supplied.
 
+Collection test execution and request hooks are documented separately in
+[frontend collection runner integration](frontend-collection-runner.md).
+
 ### Multipart content convention and limitations
 
 The frontend should store multipart text fields in `body.content` as a JSON string:

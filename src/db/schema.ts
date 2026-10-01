@@ -166,6 +166,8 @@ export const itemVersions = mysqlTable(
             headers: Array<{ key: string; value: string; description: string; enabled: boolean }>;
             body: { type: "json" | "form-urlencoded" | "multipart" | "raw" | "graphql"; content: string } | null;
             auth: RequestAuth;
+            preRequestScript: string;
+            postResponseScript: string;
           }
       >()
       .notNull(),
@@ -209,12 +211,61 @@ export const requestDetails = mysqlTable(
     bodyContent: mediumtext("body_content"),
     authType: mysqlEnum("auth_type", ["inherit", "none", "basic", "bearer", "api-key"]).notNull().default("inherit"),
     authConfig: json("auth_config").$type<Record<string, string> | null>(),
+    preRequestScript: mediumtext("pre_request_script").notNull().default(""),
+    postResponseScript: mediumtext("post_response_script").notNull().default(""),
   },
   (t) => [
     check(
       "request_details_body_check",
       sql`(${t.bodyType} IS NULL AND ${t.bodyContent} IS NULL) OR (${t.bodyType} IS NOT NULL AND ${t.bodyContent} IS NOT NULL)`,
     ),
+  ],
+);
+
+export const testRuns = mysqlTable(
+  "test_runs",
+  {
+    id: id("id").primaryKey(),
+    collectionId: id("collection_id").notNull().references(() => collections.id),
+    folderId: id("folder_id"),
+    environmentId: id("environment_id").references(() => environments.id),
+    userId: id("user_id").notNull().references(() => users.id),
+    status: mysqlEnum("status", ["running", "passed", "failed", "error"]).notNull(),
+    requestCount: int("request_count").notNull(),
+    passedCount: int("passed_count").notNull().default(0),
+    failedCount: int("failed_count").notNull().default(0),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+    durationMs: int("duration_ms"),
+  },
+  (t) => [
+    index("test_runs_collection_user_started_idx").on(t.collectionId, t.userId, t.startedAt),
+    index("test_runs_user_started_idx").on(t.userId, t.startedAt),
+  ],
+);
+
+export const testRunResults = mysqlTable(
+  "test_run_results",
+  {
+    id: id("id").primaryKey(),
+    runId: id("run_id").notNull().references(() => testRuns.id, { onDelete: "cascade" }),
+    position: int("position").notNull(),
+    itemId: id("item_id").notNull(),
+    itemName: varchar("item_name", { length: 200 }).notNull(),
+    status: mysqlEnum("status", ["passed", "failed", "error", "skipped"]).notNull(),
+    httpStatus: int("http_status"),
+    durationMs: int("duration_ms").notNull(),
+    responseSizeBytes: int("response_size_bytes"),
+    responsePreview: text("response_preview"),
+    responseTruncated: boolean("response_truncated").notNull().default(false),
+    assertions: json("assertions")
+      .$type<Array<{ name: string; passed: boolean; errorCode?: string }>>()
+      .notNull(),
+    errorCode: varchar("error_code", { length: 64 }),
+  },
+  (t) => [
+    index("test_run_results_run_position_idx").on(t.runId, t.position),
+    check("test_run_results_position_check", sql`${t.position} >= 0`),
   ],
 );
 

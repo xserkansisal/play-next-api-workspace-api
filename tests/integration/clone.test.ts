@@ -76,6 +76,8 @@ describe("cloning a collection", () => {
           ],
           body: { type: "json", content: '{"id": {{id}}}' },
           auth: { type: "api-key", in: "header", key: "X-API-Key", value: "request-secret" },
+          preRequestScript: `pm.request.headers.push({ key: "X-Trace", value: "generated" });`,
+          postResponseScript: `pm.test("accepted", () => pm.expect(pm.response.code).to.eql(201));`,
         },
       ],
     });
@@ -89,6 +91,8 @@ describe("cloning a collection", () => {
     expect(copied.queryParams).toEqual(original.queryParams);
     expect(copied.headers).toEqual(original.headers);
     expect(copied).toMatchObject({ method: "POST", url: original.url, body: original.body, auth: original.auth });
+    expect(copied.preRequestScript).toBe(original.preRequestScript);
+    expect(copied.postResponseScript).toBe(original.postResponseScript);
     expect(copied.effectiveAuth).toEqual(original.effectiveAuth);
   });
 

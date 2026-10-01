@@ -64,6 +64,13 @@
       "when": 1790893300729,
       "tag": "0008_auth_methods_inheritance",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1790895124305,
+      "tag": "0009_fearless_serpent_society",
+      "breakpoints": true
     }
   ]
 }

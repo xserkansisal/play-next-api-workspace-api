@@ -8,6 +8,9 @@ const MAX_URL_LENGTH = 8_192;
 const MAX_ROWS = 500;
 const MAX_ROW_TEXT_LENGTH = 8_192;
 const MAX_BODY_LENGTH = 1_000_000;
+export const MAX_RUN_REQUESTS = 100;
+export const MAX_SCRIPT_LENGTH = 32_768;
+const requestScriptSchema = z.string().max(MAX_SCRIPT_LENGTH).default("");
 const MAX_VARIABLE_KEY_LENGTH = 256;
 const MAX_VARIABLE_VALUE_LENGTH = 64 * 1024;
 export const MAX_TREE_DEPTH = 32;
@@ -89,6 +92,8 @@ const requestFields = {
   headers: z.array(keyValueRowSchema).max(MAX_ROWS).default([]),
   body: requestBodySchema,
   auth: authSchema,
+  preRequestScript: requestScriptSchema,
+  postResponseScript: requestScriptSchema,
 };
 
 const folderFields = {
@@ -205,6 +210,17 @@ export const updateCollectionSchema = z.strictObject({
   auth: scopedAuthSchema.nullable().optional(),
 });
 export type UpdateCollectionInput = z.output<typeof updateCollectionSchema>;
+
+export const collectionRunSchema = z.strictObject({
+  environmentId: idSchema.optional(),
+});
+export type CollectionRunInput = z.output<typeof collectionRunSchema>;
+
+export const runHistoryQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(100_000).default(0),
+});
+export type RunHistoryQuery = z.output<typeof runHistoryQuerySchema>;
 
 export const environmentVariableSchema = z.strictObject({
   key: z

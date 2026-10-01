@@ -47,6 +47,8 @@ const sampleTree = [
         method: "POST",
         url: "{{baseUrl}}/login",
         auth: { type: "bearer", token: "{{loginToken}}" },
+        preRequestScript: `pm.request.headers.push({ key: "X-Trace", value: "generated" });`,
+        postResponseScript: `pm.test("login", () => pm.expect(pm.response.code).to.eql(200));`,
         queryParams: [
           { key: "b", value: "2" },
           { key: "a", value: "1", enabled: false },
@@ -90,6 +92,8 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
       auth: { type: "bearer", token: "{{loginToken}}" },
       effectiveAuth: { type: "bearer", token: "{{loginToken}}" },
       body: { type: "json", content: '{"user":"{{user}}"}' },
+      preRequestScript: `pm.request.headers.push({ key: "X-Trace", value: "generated" });`,
+      postResponseScript: `pm.test("login", () => pm.expect(pm.response.code).to.eql(200));`,
       queryParams: [
         { key: "b", value: "2", description: "", enabled: true },
         { key: "a", value: "1", description: "", enabled: false },

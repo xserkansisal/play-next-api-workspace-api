@@ -45,6 +45,8 @@ export interface RequestNode extends NodeBase {
   body: RequestItemFields["body"];
   auth: RequestAuth;
   effectiveAuth: ScopedAuth;
+  preRequestScript: string;
+  postResponseScript: string;
 }
 
 export type ItemNode = FolderNode | RequestNode;
@@ -149,6 +151,8 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, 
         body: d.bodyType !== null && d.bodyContent !== null ? { type: d.bodyType, content: d.bodyContent } : null,
         auth: toRequestAuth(d.authType, d.authConfig),
         effectiveAuth: { type: "none" },
+        preRequestScript: d.preRequestScript,
+        postResponseScript: d.postResponseScript,
       });
     }
 
@@ -240,6 +244,8 @@ export async function writeRequestDetails(
     bodyContent: fields.body ? fields.body.content : null,
     authType: fields.auth.type,
     authConfig: authConfigForStorage(fields.auth),
+    preRequestScript: fields.preRequestScript ?? "",
+    postResponseScript: fields.postResponseScript ?? "",
   };
   if (isNew) {
     await db.insert(requestDetails).values({ itemId, ...values });

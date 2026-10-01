@@ -8,6 +8,7 @@ import { createAuthenticationMiddleware } from "./middleware/authenticate.js";
 import { createCorsMiddleware } from "./middleware/cors.js";
 import { createErrorHandler, notFoundHandler, type ErrorHandlerOptions } from "./middleware/errorHandler.js";
 import { createCollectionsRouter } from "./routes/collections.js";
+import { createCollectionRunsRouter } from "./routes/collectionRuns.js";
 import { createEnvironmentsRouter } from "./routes/environments.js";
 import { createVariablesRouter } from "./routes/variables.js";
 import { createEventsRouter } from "./routes/events.js";
@@ -80,6 +81,7 @@ export function createApp({
   );
 
   app.use("/api/v1/presence", requireAuth, createPresenceRouter(db, presence));
+  app.use("/api/v1/collections", requireAuth, createCollectionRunsRouter(db, env));
   app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events, collectionsOptions));
   app.use("/api/v1/environments", requireAuth, createEnvironmentsRouter(db, events));
   app.use("/api/v1/variables", requireAuth, createVariablesRouter(db, events));
