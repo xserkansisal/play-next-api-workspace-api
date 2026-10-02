@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { withAvatarUrl } from "../auth/avatarUrl.js";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
@@ -19,6 +19,8 @@ import {
   updateTeam,
   updateTeamMemberRole,
   updateUserSystemRole,
+  type TeamDetail,
+  type TeamMember,
 } from "../services/teams.js";
 import {
   addTeamMemberSchema,
@@ -41,6 +43,8 @@ export interface AdminRouterOptions {
 /** System administration. Mount behind authentication and `requireSystemAdmin`. */
 export function createAdminRouter(db: AppDatabase, options: AdminRouterOptions = {}): Router {
   const router = Router();
+  const member = (req: Request, value: TeamMember) => withAvatarUrl(req, options.corsOrigin, value);
+  const team = (req: Request, value: TeamDetail) => ({ ...value, members: value.members.map((m) => member(req, m)) });
 
   // REST calls re-check membership on every request; open event streams and presence entries do
   // not, so they are ended here the moment access is withdrawn.
@@ -55,25 +59,25 @@ export function createAdminRouter(db: AppDatabase, options: AdminRouterOptions =
   });
 
   router.post("/teams", async (req, res) => {
-    res.status(201).json(await createTeam(db, createTeamSchema.parse(req.body), authenticatedUserId(req)));
+    res.status(201).json(team(req, await createTeam(db, createTeamSchema.parse(req.body), authenticatedUserId(req))));
   });
 
   router.get("/teams/:teamId", async (req, res) => {
-    res.json(await readTeam(db, req.params.teamId));
+    res.json(team(req, await readTeam(db, req.params.teamId)));
   });
 
   router.patch("/teams/:teamId", async (req, res) => {
-    res.json(await updateTeam(db, req.params.teamId, updateTeamSchema.parse(req.body), authenticatedUserId(req)));
+    res.json(team(req, await updateTeam(db, req.params.teamId, updateTeamSchema.parse(req.body), authenticatedUserId(req))));
   });
 
   router.post("/teams/:teamId/archive", async (req, res) => {
-    const team = await setTeamArchived(db, req.params.teamId, true, authenticatedUserId(req));
-    revokeAccess(team.id);
-    res.json(team);
+    const archived = await setTeamArchived(db, req.params.teamId, true, authenticatedUserId(req));
+    revokeAccess(archived.id);
+    res.json(team(req, archived));
   });
 
   router.post("/teams/:teamId/unarchive", async (req, res) => {
-    res.json(await setTeamArchived(db, req.params.teamId, false, authenticatedUserId(req)));
+    res.json(team(req, await setTeamArchived(db, req.params.teamId, false, authenticatedUserId(req))));
   });
 
   router.delete("/teams/:teamId", async (req, res) => {
@@ -82,17 +86,17 @@ export function createAdminRouter(db: AppDatabase, options: AdminRouterOptions =
   });
 
   router.get("/teams/:teamId/members", async (req, res) => {
-    res.json({ members: await listTeamMembers(db, req.params.teamId) });
+    res.json({ members: (await listTeamMembers(db, req.params.teamId)).map((m) => member(req, m)) });
   });
 
   router.post("/teams/:teamId/members", async (req, res) => {
-    const member = await addTeamMember(db, req.params.teamId, addTeamMemberSchema.parse(req.body), authenticatedUserId(req));
-    res.status(201).json(member);
+    const added = await addTeamMember(db, req.params.teamId, addTeamMemberSchema.parse(req.body), authenticatedUserId(req));
+    res.status(201).json(member(req, added));
   });
 
   router.patch("/teams/:teamId/members/:userId", async (req, res) => {
     const { role } = updateTeamMemberSchema.parse(req.body);
-    res.json(await updateTeamMemberRole(db, req.params.teamId, req.params.userId, role, authenticatedUserId(req)));
+    res.json(member(req, await updateTeamMemberRole(db, req.params.teamId, req.params.userId, role, authenticatedUserId(req))));
   });
 
   router.delete("/teams/:teamId/members/:userId", async (req, res) => {

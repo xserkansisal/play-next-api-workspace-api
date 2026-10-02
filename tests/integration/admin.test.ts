@@ -85,6 +85,25 @@ describe("user avatars", () => {
     await ctx.api.get(url).expect(200).expect("Content-Type", "image/webp");
   });
 
+  it("exposes avatarUrl on team members", async () => {
+    const person = await signInAs(ctx, "photo.person@sisal.com");
+    const url = await uploadAvatar(person);
+    const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Photos" }).expect(201)).body;
+
+    const added = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "photo.person@sisal.com" }).expect(201)).body;
+    expect(added).toMatchObject({ email: "photo.person@sisal.com", avatarUrl: url });
+    expect(added).not.toHaveProperty("avatarId");
+    const noPhoto = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "no.photo@sisal.com" }).expect(201)).body;
+    expect(noPhoto.avatarUrl).toBeNull();
+
+    const members = (await ctx.api.get(`/api/v1/admin/teams/${team.id}/members`).expect(200)).body.members;
+    expect(members.find((m: { userId: string }) => m.userId === added.userId)).toMatchObject({ avatarUrl: url });
+    const detail = (await ctx.api.get(`/api/v1/admin/teams/${team.id}`).expect(200)).body;
+    expect(detail.members.find((m: { userId: string }) => m.userId === added.userId)).toMatchObject({ avatarUrl: url });
+    const changed = (await ctx.api.patch(`/api/v1/admin/teams/${team.id}/members/${added.userId}`).send({ role: "owner" }).expect(200)).body;
+    expect(changed).toMatchObject({ role: "owner", avatarUrl: url });
+  });
+
   it("returns absolute avatar URLs to the allowed cross-origin client", async () => {
     const crossOrigin = await createTestContext(":memory:", {
       env: { ADMIN_EMAILS: "Test@sisal.com", CORS_ORIGIN: "http://localhost:5173" },
@@ -99,6 +118,14 @@ describe("user avatars", () => {
       expect(listed.avatarUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+${path}$`));
       const detail = (await crossOrigin.api.get(`/api/v1/admin/users/${personId}`).set("Origin", "http://localhost:5173").expect(200)).body;
       expect(detail.avatarUrl).toBe(listed.avatarUrl);
+
+      const team = (await crossOrigin.api.post("/api/v1/admin/teams").send({ name: "Photos" }).expect(201)).body;
+      const added = await crossOrigin.api
+        .post(`/api/v1/admin/teams/${team.id}/members`)
+        .set("Origin", "http://localhost:5173")
+        .send({ email: "photo.person@sisal.com" })
+        .expect(201);
+      expect(added.body.avatarUrl).toBe(listed.avatarUrl);
     } finally {
       await crossOrigin.close();
     }

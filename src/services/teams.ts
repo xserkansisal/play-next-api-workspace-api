@@ -28,6 +28,8 @@ export interface TeamMember {
   avatarColor: string;
   role: TeamRole;
   joinedAt: string;
+  /** Id of the stored avatar image, or null. Routes expose it to clients as `avatarUrl`. */
+  avatarId: string | null;
 }
 
 export interface TeamDetail extends TeamSummary {
@@ -178,9 +180,11 @@ async function selectMembers(db: DbExecutor, teamId: string): Promise<TeamMember
       avatarColor: users.avatarColor,
       role: teamMembers.role,
       joinedAt: teamMembers.createdAt,
+      avatarId: userAvatars.id,
     })
     .from(teamMembers)
     .innerJoin(users, eq(teamMembers.userId, users.id))
+    .leftJoin(userAvatars, eq(userAvatars.userId, users.id))
     .where(eq(teamMembers.teamId, teamId));
   return rows.sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || (a.email < b.email ? -1 : a.email > b.email ? 1 : 0));
 }

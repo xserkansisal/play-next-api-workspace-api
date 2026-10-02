@@ -169,6 +169,7 @@ interface TeamSummary {
 interface TeamMember {
   userId: string; email: string; firstName: string; lastName: string;
   avatarColor: string; role: TeamRole; joinedAt: string;
+  avatarUrl: string | null; // same convention as /auth/me; null when no photo was uploaded
 }
 interface TeamDetail extends TeamSummary { members: TeamMember[] }
 
