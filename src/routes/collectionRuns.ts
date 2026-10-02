@@ -3,6 +3,7 @@ import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { authenticatedUserId } from "../middleware/authenticate.js";
 import { createUserRateLimit } from "../middleware/rateLimit.js";
+import { guardCollectionParam } from "./teamGuards.js";
 import { collectionRunSchema, idSchema, runHistoryQuerySchema } from "../validation/schemas.js";
 import {
   getCollectionRun,
@@ -23,6 +24,7 @@ export function createCollectionRunsRouter(
   options: CollectionRunsRouterOptions = {},
 ): Router {
   const router = Router();
+  guardCollectionParam(router, db);
   const runRateLimit = createUserRateLimit(options.rateLimit ?? { limit: 3, windowMs: 60_000 });
   const proxyOptions: RunnerProxyOptions = {
     allowedHosts: parseAllowedHosts(env.PROXY_ALLOWED_HOSTS),

@@ -3,14 +3,18 @@ import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { findSessionUser, type AuthUser } from "../auth/service.js";
 import { HttpError } from "../errors.js";
+import { findActiveMemberships, type TeamContext } from "../services/teams.js";
 
 declare global {
   namespace Express {
     interface Request {
       authUser?: AuthUser;
+      team?: TeamContext;
     }
   }
 }
+
+export const TEAM_HEADER = "X-Team-Id";
 
 export function readCookie(req: Request, name: string): string | undefined {
   const header = req.headers.cookie;
@@ -45,4 +49,67 @@ export function createAuthenticationMiddleware(db: AppDatabase, cookieName: Env[
 export function authenticatedUserId(req: Request): string {
   if (!req.authUser) throw new HttpError(401, "Sign-in required", "AUTHENTICATION_REQUIRED");
   return req.authUser.id;
+}
+
+// Must run after the authentication middleware. The role is read from the session lookup made for
+// this request, so a demotion takes effect on the very next call.
+export const requireSystemAdmin: RequestHandler = (req, res, next) => {
+  if (req.authUser?.systemRole !== "admin") {
+    res.status(403).json({ error: { code: "ADMIN_REQUIRED", message: "System administrator access is required" } });
+    return;
+  }
+  next();
+};
+
+/**
+ * Resolves which team this request works in. Must run after the authentication middleware.
+ *
+ * The team comes from the `X-Team-Id` header, or the `teamId` query parameter for clients that
+ * cannot set headers (EventSource). Without either, a user who belongs to exactly one team works
+ * in it; anyone with several must choose. A team the caller does not belong to - or that is
+ * archived - answers exactly like one that does not exist, so ids of other teams are never
+ * confirmed. Membership is read per request, so a removal takes effect on the very next call.
+ * Being a system admin grants nothing here.
+ */
+export function createTeamContextMiddleware(db: AppDatabase): RequestHandler {
+  return async (req, res, next) => {
+    const userId = authenticatedUserId(req);
+    const fromQuery = typeof req.query.teamId === "string" ? req.query.teamId : undefined;
+    const requested = req.get(TEAM_HEADER)?.trim() || fromQuery?.trim() || undefined;
+
+    if (requested !== undefined) {
+      const [team] = requested.length <= 36 ? await findActiveMemberships(db, userId, requested) : [];
+      if (!team) {
+        res.status(404).json({ error: { code: "TEAM_NOT_FOUND", message: `Team ${requested} not found` } });
+        return;
+      }
+      req.team = team;
+      next();
+      return;
+    }
+
+    const memberships = await findActiveMemberships(db, userId);
+    if (memberships.length === 0) {
+      res.status(403).json({
+        error: { code: "TEAM_MEMBERSHIP_REQUIRED", message: "You are not a member of any team yet" },
+      });
+      return;
+    }
+    if (memberships.length > 1) {
+      res.status(400).json({
+        error: {
+          code: "TEAM_CONTEXT_REQUIRED",
+          message: `Choose a team with the ${TEAM_HEADER} header`,
+        },
+      });
+      return;
+    }
+    req.team = memberships[0];
+    next();
+  };
+}
+
+export function requestTeamId(req: Request): string {
+  if (!req.team) throw new HttpError(400, `Choose a team with the ${TEAM_HEADER} header`, "TEAM_CONTEXT_REQUIRED");
+  return req.team.id;
 }

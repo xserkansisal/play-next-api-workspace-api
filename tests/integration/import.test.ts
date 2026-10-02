@@ -8,7 +8,7 @@ let published: SequencedChangeEvent[];
 async function setup(options: Parameters<typeof createTestContext>[1] = {}) {
   ctx = await createTestContext(":memory:", options);
   published = [];
-  ctx.events.subscribe((event) => published.push(event));
+  ctx.subscribe((event) => published.push(event));
 }
 
 afterEach(async () => ctx.close());

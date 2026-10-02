@@ -59,6 +59,7 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; setting host and sender switches on real delivery in any mode; username and password must be set together; see "Configuring email delivery" |
 | `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the `/api/v1/auth/dev-inbox` development helper for a directly connected local caller; refused for anything relayed through a proxy; never set in production |
 | `AUTH_DEV_BYPASS` | `false` | Development only: registers `POST /api/v1/auth/dev-login`, which signs in an allowed email without a code. Startup fails if enabled when `NODE_ENV` is not `development`; see `docs/frontend-dev-login.md` |
+| `ADMIN_EMAILS` | unset | Comma-separated addresses promoted to system admin when they sign in. Bootstraps the first admin; removing an address does not demote anyone. See "Teams and administration" |
 
 JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
 collection imports. Each individual request body's `content` is still limited to 1,000,000
@@ -78,9 +79,10 @@ Normalized tables: `collections`, `items` (folders and requests as a recursive t
 `environments`, and ordered `environment_variables`. IDs are UUIDs, timestamps are ISO-8601 UTC
 strings, and deletion is a soft delete (`deleted_at`, plus `trash_root_id` on items so a subtree
 is restored together). Sibling order is not persisted; lists are returned alphabetically.
+Collections, environments and global variables carry a `team_id` (see "Team workspaces").
 Indexed generated columns preserve the previous partial-unique-index behavior: active collection
-and environment names are unique, as are active sibling folder names (request names may repeat).
-Scoped variables retain one key per user and one global value per key.
+and environment names are unique within a team, as are active sibling folder names (request names
+may repeat). Scoped variables retain one key per user and one global value per key per team.
 
 ## API (v1)
 
@@ -118,7 +120,7 @@ Scoped variables retain one key per user and one global value per key.
 | GET/POST | `/api/v1/environments` | List / create environments |
 | GET/PUT/DELETE | `/api/v1/environments/:id` | Read / save (replaces variables) / move to Trash |
 | POST | `/api/v1/environments/:id/clone` | Copy the environment and its variables under a free name |
-| GET | `/api/v1/variables` | This user's own variables plus every global one |
+| GET | `/api/v1/variables` | This user's own variables plus every global one of the selected team |
 | GET | `/api/v1/variables/order` | Read this user's saved display order of variable names |
 | PUT | `/api/v1/variables/order` | Replace this user's display order. Body: `{ "order": string[] }` |
 | PUT | `/api/v1/variables/:scope/:key` | Save a value at `user` or `global` scope. Body: `{ "value": string }` |
@@ -137,6 +139,8 @@ See [frontend version history integration](docs/frontend-version-history.md) for
 response formats and behavior.
 See [frontend collection runner integration](docs/frontend-collection-runner.md) for scripts,
 sequential variable chaining, run results, and history.
+See [frontend team workspaces integration](docs/frontend-teams.md) for the team switcher,
+`X-Team-Id`, team-scoped SSE, error handling and the admin panel API.
 | GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
 | PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
 | PUT | `/api/v1/presence` | Refresh or clear the current browser tab's collection/folder/request location |
@@ -165,6 +169,80 @@ synthetic profiles and their randomly assigned active locations are stored in My
 re-reads those records and refreshes their in-memory heartbeats every 15 seconds, changing their
 stored random location once per minute. This switch is rejected in production. Use
 `npm run presence:clear` to remove the synthetic users.
+
+## Teams and administration
+
+Users hold a system-wide `systemRole` (`user` or `admin`, returned on `verify-code` and `/me`)
+and belong to any number of teams with a per-team role of `owner`, `admin` or `member`. A system
+admin manages teams and users but does not see any team's content by holding that role. The first
+admins come from `ADMIN_EMAILS`; after that, roles are granted with
+`PATCH /api/v1/admin/users/:userId`. Every route under `/api/v1/admin` returns `403 ADMIN_REQUIRED`
+to anyone else, and the role is checked on every request, so a demotion takes effect immediately.
+
+| Method | Route | Description |
+| ------ | ----- | ----------- |
+| GET | `/api/v1/teams` | The signed-in user's non-archived teams with their `role` (team switcher) |
+| GET/POST | `/api/v1/admin/teams` | List (`?includeArchived=true`) / create teams. Body: `{ "name", "description"? }` |
+| GET/PATCH | `/api/v1/admin/teams/:teamId` | Read a team with its members / update `name` and/or `description` |
+| POST | `/api/v1/admin/teams/:teamId/archive` / `unarchive` | Archive or restore a team |
+| DELETE | `/api/v1/admin/teams/:teamId` | Permanently delete an archived team (`409 TEAM_NOT_ARCHIVED` otherwise; `409 TEAM_NOT_EMPTY` while any collection, environment or global variable, trashed ones included, still belongs to it) |
+| GET/POST | `/api/v1/admin/teams/:teamId/members` | List / add a member by email. Body: `{ "email", "role"? }` (default `member`) |
+| PATCH/DELETE | `/api/v1/admin/teams/:teamId/members/:userId` | Change a member's `role` / remove the member |
+| GET | `/api/v1/admin/users` | Search users (`?query=&limit=&offset=`); returns `{ users, total }` |
+| GET/PATCH | `/api/v1/admin/users/:userId` | Read a user with their teams / set `systemRole` |
+| GET | `/api/v1/admin/audit-log` | Administrative changes, newest first (`?teamId=&limit=&offset=`) |
+
+Rules:
+
+- Team names are unique case-insensitively, archived teams included (`409 TEAM_NAME_CONFLICT`).
+- Deleting is two steps: archive first, then delete. An archived team disappears from
+  `/api/v1/teams` and its membership cannot be changed (`409 TEAM_ARCHIVED`).
+- A team that has an owner must keep at least one (`409 TEAM_LAST_OWNER`), and the system must
+  keep at least one admin (`409 LAST_SYSTEM_ADMIN`).
+- Members can be added before they ever sign in, as long as the address is on an allowed domain.
+  The account is created without a session (`hasSignedIn: false`), and signing in later picks it
+  up together with its memberships.
+- Every administrative change is written to `admin_audit_log` in the same transaction.
+- Removing a member or archiving a team immediately ends the affected `/api/v1/events` streams
+  and presence entries; REST access is re-checked on every request.
+
+### Team workspaces
+
+Collections (with their items, versions and runs), environments, Trash, presence, the change
+stream and global variables belong to one team. Every route under `/api/v1/collections`,
+`/api/v1/environments`, `/api/v1/variables`, `/api/v1/trash`, `/api/v1/presence` and
+`/api/v1/events` works inside the team named by the `X-Team-Id` header, or the `teamId` query
+parameter where headers cannot be set (`EventSource`). Auth, `/api/v1/teams`, preferences, the
+proxy and `/api/v1/admin` are not team-scoped.
+
+- No team given and the user is in exactly one team: that team is used.
+- No team given and the user is in several: `400 TEAM_CONTEXT_REQUIRED`.
+- The user is in no team: `403 TEAM_MEMBERSHIP_REQUIRED` (an admin must add them).
+- An unknown or archived team, or one the user is not in: `404 TEAM_NOT_FOUND`. Being a system
+  admin does not grant access to a team's content.
+- Another team's collection or environment answers exactly like a missing one (`404`). Items
+  cannot be moved into another team's collection (`404 TARGET_NOT_FOUND`), and a run cannot use
+  another team's environment.
+- `global` variables are shared by everyone in the team (the scope keeps its name for API
+  compatibility). `user` variables, run history and variable display order stay personal and are
+  the same in every team.
+- Change events about team resources reach only streams opened for that team; presence snapshots
+  list only that team's viewers.
+
+Migration `0013_team_scoped_resources` creates a `Default` team
+(`00000000-0000-4000-8000-000000000001`) and assigns every existing collection, environment and
+global variable to it, without members. Migration `0015_move_default_to_game_studio` then moves
+all of it to Game Studio and deletes the emptied Default team. Users in no team receive
+`403 TEAM_MEMBERSHIP_REQUIRED` on team-scoped routes until an admin adds them.
+
+Migration `0014_seed_teams` creates the initial teams (Game Studio, Mobile Gaming, PAM, Cross
+Module, Lottery, Hybrid App, Native App), each with one team `admin`. Admin accounts that do not
+exist yet are created without a session, as when they are added from the admin panel. Teams are
+matched by name and users by email, so existing rows are reused rather than duplicated.
+
+Migration `0016_seed_system_admin` makes `serkan.taghan@fluttersea.com` the first system admin
+(creating the account if needed). `ADMIN_EMAILS` remains available for additional bootstrap
+admins.
 
 ## Scoped variables
 

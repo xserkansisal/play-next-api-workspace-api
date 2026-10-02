@@ -141,7 +141,7 @@ export function cloneCollection(db: AppDatabase, id: string, actorId: string): P
     const source = await requireActiveCollection(tx, id);
     const name = await copyNameAsync(
       source.name,
-      async (candidate) => (await findActiveCollectionByName(tx, candidate)) !== undefined,
+      async (candidate) => (await findActiveCollectionByName(tx, source.teamId, candidate)) !== undefined,
     );
 
     const newCollectionId = newId();
@@ -152,6 +152,7 @@ export function cloneCollection(db: AppDatabase, id: string, actorId: string): P
       nameKey: nameKey(name),
       description: source.description,
       authConfig: source.authConfig,
+      teamId: source.teamId,
       createdAt: timestamp,
       updatedAt: timestamp,
       createdBy: actorId,

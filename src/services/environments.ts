@@ -117,12 +117,24 @@ export async function addEnvironmentVariable(
   }
 }
 
-export async function findActiveEnvironmentByName(db: DbExecutor, name: string, excludeId?: string): Promise<EnvironmentRow | undefined> {
+/** Names are unique among a team's active environments; other teams may reuse them. */
+export async function findActiveEnvironmentByName(
+  db: DbExecutor,
+  teamId: string,
+  name: string,
+  excludeId?: string,
+): Promise<EnvironmentRow | undefined> {
   const rows = await db
     .select()
     .from(environments)
-    .where(and(eq(environments.nameKey, nameKey(name)), isNull(environments.deletedAt)));
+    .where(and(eq(environments.teamId, teamId), eq(environments.nameKey, nameKey(name)), isNull(environments.deletedAt)));
   return rows.find((row) => row.id !== excludeId);
+}
+
+/** Whether an environment - active or in Trash - belongs to the team. */
+export async function environmentBelongsToTeam(db: DbExecutor, teamId: string, id: string): Promise<boolean> {
+  const row = await first(db.select({ teamId: environments.teamId }).from(environments).where(eq(environments.id, id)).limit(1));
+  return row?.teamId === teamId;
 }
 
 export function environmentNameConflictError(name: string, existingId: string): ConflictError {
@@ -139,8 +151,8 @@ async function writeVariables(db: DbExecutor, environmentId: string, variables: 
   }
 }
 
-export async function listEnvironments(db: AppDatabase): Promise<Environment[]> {
-  const rows = await db.select().from(environments).where(isNull(environments.deletedAt));
+export async function listEnvironments(db: AppDatabase, teamId: string): Promise<Environment[]> {
+  const rows = await db.select().from(environments).where(and(eq(environments.teamId, teamId), isNull(environments.deletedAt)));
   return (await hydrate(db, rows)).sort(compareByName);
 }
 
@@ -149,9 +161,9 @@ export async function readEnvironment(db: DbExecutor, id: string): Promise<Envir
   return env!;
 }
 
-export function createEnvironment(db: AppDatabase, input: EnvironmentInput, actorId: string): Promise<Environment> {
+export function createEnvironment(db: AppDatabase, teamId: string, input: EnvironmentInput, actorId: string): Promise<Environment> {
   return db.transaction(async (tx) => {
-      const existing = await findActiveEnvironmentByName(tx, input.name);
+      const existing = await findActiveEnvironmentByName(tx, teamId, input.name);
       if (existing) throw environmentNameConflictError(input.name, existing.id);
 
       const id = newId();
@@ -161,6 +173,7 @@ export function createEnvironment(db: AppDatabase, input: EnvironmentInput, acto
           id,
           name: input.name,
           nameKey: nameKey(input.name),
+          teamId,
           createdAt: timestamp,
           updatedAt: timestamp,
           createdBy: actorId,
@@ -175,8 +188,8 @@ export function createEnvironment(db: AppDatabase, input: EnvironmentInput, acto
 /** Explicit save: replaces the environment's name and full variable list (last save wins). */
 export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput, actorId: string): Promise<Environment> {
   return db.transaction(async (tx) => {
-      await requireActive(tx, id);
-      const existing = await findActiveEnvironmentByName(tx, input.name, id);
+      const current = await requireActive(tx, id);
+      const existing = await findActiveEnvironmentByName(tx, current.teamId, input.name, id);
       if (existing) throw environmentNameConflictError(input.name, existing.id);
 
       await tx.update(environments)
@@ -196,10 +209,11 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
  */
 export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): Promise<Environment> {
   return db.transaction(async (tx) => {
+      const { teamId } = await requireActive(tx, id);
       const source = await readEnvironment(tx, id);
       const name = await copyNameAsync(
         source.name,
-        async (candidate) => (await findActiveEnvironmentByName(tx, candidate)) !== undefined,
+        async (candidate) => (await findActiveEnvironmentByName(tx, teamId, candidate)) !== undefined,
       );
 
       const newEnvironmentId = newId();
@@ -209,6 +223,7 @@ export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): 
           id: newEnvironmentId,
           name,
           nameKey: nameKey(name),
+          teamId,
           createdAt: timestamp,
           updatedAt: timestamp,
           createdBy: actorId,

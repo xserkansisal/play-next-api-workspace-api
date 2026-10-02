@@ -117,6 +117,7 @@ function collectRequests(nodes: ItemNode[], output: RequestNode[]): void {
 async function loadRunVariables(
   db: AppDatabase,
   userId: string,
+  teamId: string,
   environmentId: string | undefined,
 ): Promise<Map<string, string>> {
   let environmentRows: Array<{ key: string; value: string }> = [];
@@ -124,7 +125,7 @@ async function loadRunVariables(
     const [environment] = await db
       .select({ id: environments.id })
       .from(environments)
-      .where(and(eq(environments.id, environmentId), isNull(environments.deletedAt)))
+      .where(and(eq(environments.id, environmentId), eq(environments.teamId, teamId), isNull(environments.deletedAt)))
       .limit(1);
     if (!environment) throw new NotFoundError(`Environment ${environmentId} not found`);
     environmentRows = await db
@@ -137,7 +138,10 @@ async function loadRunVariables(
   const scopedRows = await db
     .select({ scope: variables.scope, key: variables.key, value: variables.value })
     .from(variables)
-    .where(or(and(eq(variables.scope, "user"), eq(variables.userId, userId)), eq(variables.scope, "global")));
+    .where(or(
+      and(eq(variables.scope, "user"), eq(variables.userId, userId)),
+      and(eq(variables.scope, "global"), eq(variables.teamId, teamId)),
+    ));
   const map = new Map<string, string>();
   for (const row of scopedRows) if (row.scope === "global") map.set(row.key, row.value);
   for (const row of scopedRows) if (row.scope === "user") map.set(row.key, row.value);
@@ -323,7 +327,8 @@ export async function runCollection(
   proxyOptions: RunnerProxyOptions,
   folderId?: string,
 ): Promise<RunDetail> {
-  await requireActiveCollection(db, collectionId);
+  // The environment and the shared variables come from the collection's own team.
+  const { teamId } = await requireActiveCollection(db, collectionId);
   const tree = await loadActiveTree(db, collectionId);
   let roots = tree.roots;
   if (folderId) {
@@ -340,7 +345,7 @@ export async function runCollection(
       maxRequests: MAX_RUN_REQUESTS,
     });
   }
-  const variables = await loadRunVariables(db, userId, input.environmentId);
+  const variables = await loadRunVariables(db, userId, teamId, input.environmentId);
   const runId = newId();
   const startedAt = nowIso();
   const startTimeMs = Date.now();

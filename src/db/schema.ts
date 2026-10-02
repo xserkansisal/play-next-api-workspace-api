@@ -30,8 +30,67 @@ export const users = mysqlTable("users", {
   firstName: varchar("first_name", { length: 320 }).notNull().default(""),
   lastName: varchar("last_name", { length: 320 }).notNull().default(""),
   avatarColor: varchar("avatar_color", { length: 16 }).notNull().default("violet"),
+  // System-wide role, independent of team membership: an admin manages teams and users but does
+  // not gain access to any team's content by holding this role.
+  systemRole: mysqlEnum("system_role", ["user", "admin"]).notNull().default("user"),
   createdAt: timestamp("created_at").notNull(),
 });
+
+export const teams = mysqlTable(
+  "teams",
+  {
+    id: id("id").primaryKey(),
+    name: varchar("name", { length: 200 }).notNull(),
+    // Unique across archived teams too, so unarchiving can never collide with a newer team.
+    nameKey: varchar("name_key", { length: 400 }).notNull().unique(),
+    description: description("description"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    archivedAt: timestamp("archived_at"),
+    createdBy: id("created_by").references(() => users.id),
+    updatedBy: id("updated_by").references(() => users.id),
+  },
+);
+
+export const TEAM_ROLES = ["owner", "admin", "member"] as const;
+
+export const teamMembers = mysqlTable(
+  "team_members",
+  {
+    teamId: id("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: id("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: mysqlEnum("role", TEAM_ROLES).notNull().default("member"),
+    createdAt: timestamp("created_at").notNull(),
+    addedBy: id("added_by").references(() => users.id),
+  },
+  (t) => [
+    primaryKey({ name: "team_members_pk", columns: [t.teamId, t.userId] }),
+    index("team_members_user_idx").on(t.userId),
+  ],
+);
+
+export const adminAuditLog = mysqlTable(
+  "admin_audit_log",
+  {
+    id: id("id").primaryKey(),
+    actorId: id("actor_id").references(() => users.id, { onDelete: "set null" }),
+    action: varchar("action", { length: 64 }).notNull(),
+    targetType: mysqlEnum("target_type", ["team", "team_member", "user"]).notNull(),
+    // Kept as plain ids rather than foreign keys: an entry must outlive the team or user it names.
+    targetId: id("target_id").notNull(),
+    teamId: id("team_id"),
+    details: json("details").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (t) => [
+    index("admin_audit_log_created_idx").on(t.createdAt),
+    index("admin_audit_log_team_created_idx").on(t.teamId, t.createdAt),
+  ],
+);
 
 const mediumBlob = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "mediumblob",
@@ -99,13 +158,16 @@ export const collections = mysqlTable(
     ),
     description: description("description"),
     authConfig: json("auth_config").$type<ScopedAuth | null>().default(null),
+    teamId: id("team_id")
+      .notNull()
+      .references(() => teams.id),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
     deletedAt: timestamp("deleted_at"),
     createdBy: id("created_by").references(() => users.id),
     updatedBy: id("updated_by").references(() => users.id),
   },
-  (t) => [uniqueIndex("collections_active_name_unique").on(t.activeNameKey)],
+  (t) => [uniqueIndex("collections_team_active_name_unique").on(t.teamId, t.activeNameKey)],
 );
 
 export const collectionVersions = mysqlTable(
@@ -320,13 +382,16 @@ export const environments = mysqlTable(
       sql`CASE WHEN ${sql.identifier("deleted_at")} IS NULL THEN ${sql.identifier("name_key")} ELSE NULL END`,
       { mode: "virtual" },
     ),
+    teamId: id("team_id")
+      .notNull()
+      .references(() => teams.id),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
     deletedAt: timestamp("deleted_at"),
     createdBy: id("created_by").references(() => users.id),
     updatedBy: id("updated_by").references(() => users.id),
   },
-  (t) => [uniqueIndex("environments_active_name_unique").on(t.activeNameKey)],
+  (t) => [uniqueIndex("environments_team_active_name_unique").on(t.teamId, t.activeNameKey)],
 );
 
 export const environmentVariables = mysqlTable(
@@ -357,6 +422,8 @@ export const variables = mysqlTable(
     id: id("id").primaryKey(),
     scope: mysqlEnum("scope", ["user", "global"]).notNull(),
     userId: id("user_id").references(() => users.id),
+    // Set for `global` rows only: "global" means everyone in this team, not everyone signed in.
+    teamId: id("team_id").references(() => teams.id),
     key: varchar("key", { length: 256 }).notNull(),
     userScopedKey: varchar("user_scoped_key", { length: 256 }).generatedAlwaysAs(
       sql`CASE WHEN ${sql.identifier("scope")} = 'user' THEN ${sql.identifier("key")} ELSE NULL END`,
@@ -374,10 +441,10 @@ export const variables = mysqlTable(
   (t) => [
     check(
       "variables_owner_check",
-      sql`(${t.scope} = 'user' AND ${t.userId} IS NOT NULL) OR (${t.scope} = 'global' AND ${t.userId} IS NULL)`,
+      sql`(${t.scope} = 'user' AND ${t.userId} IS NOT NULL AND ${t.teamId} IS NULL) OR (${t.scope} = 'global' AND ${t.userId} IS NULL AND ${t.teamId} IS NOT NULL)`,
     ),
     uniqueIndex("variables_user_key_unique").on(t.userId, t.userScopedKey),
-    uniqueIndex("variables_global_key_unique").on(t.globalScopedKey),
+    uniqueIndex("variables_team_global_key_unique").on(t.teamId, t.globalScopedKey),
   ],
 );
 

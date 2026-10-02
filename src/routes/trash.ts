@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEvent, ChangeEventHub } from "../events/hub.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
 import { checkRestore, listTrash, restoreFromTrash, type RestoredResource } from "../services/trash.js";
 import { restoreSchema } from "../validation/schemas.js";
 
@@ -19,22 +19,23 @@ function restoredEventTarget(resource: RestoredResource): Pick<ChangeEvent, "kin
 export function createTrashRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
 
-  router.get("/", async (_req, res) => {
-    res.json({ entries: await listTrash(db) });
+  router.get("/", async (req, res) => {
+    res.json({ entries: await listTrash(db, requestTeamId(req)) });
   });
 
   router.post("/:id/restore/check", async (req, res) => {
-    res.json(await checkRestore(db, req.params.id, restoreSchema.parse(req.body ?? {})));
+    res.json(await checkRestore(db, requestTeamId(req), req.params.id, restoreSchema.parse(req.body ?? {})));
   });
 
   router.post("/:id/restore", async (req, res) => {
     const { resource, restoredAt } = await restoreFromTrash(
       db,
+      requestTeamId(req),
       req.params.id,
       restoreSchema.parse(req.body ?? {}),
       authenticatedUserId(req),
     );
-    events.publish({ ...restoredEventTarget(resource), operation: "restored", changedAt: restoredAt });
+    events.publish(requestTeamId(req), { ...restoredEventTarget(resource), operation: "restored", changedAt: restoredAt });
     res.json(resource);
   });
 

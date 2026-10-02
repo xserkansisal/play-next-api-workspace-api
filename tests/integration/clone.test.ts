@@ -139,7 +139,7 @@ describe("cloning a collection", () => {
   it("announces the copy as a created collection", async () => {
     const source = await createCollection({ name: "Commerce" });
     const seen: unknown[] = [];
-    const unsubscribe = ctx.events.subscribe((event) => seen.push(event));
+    const unsubscribe = ctx.subscribe((event) => seen.push(event));
     const clone = (await ctx.api.post(`/api/v1/collections/${source.id}/clone`).expect(201)).body;
     unsubscribe();
     expect(seen).toContainEqual(
@@ -255,7 +255,7 @@ describe("cloning a folder or a request", () => {
     const folder = await createFolder("Orders");
     const request = await createRequest("Charge");
     const seen: { kind?: string; id?: string }[] = [];
-    const unsubscribe = ctx.events.subscribe((event) => seen.push(event as { kind?: string; id?: string }));
+    const unsubscribe = ctx.subscribe((event) => seen.push(event as { kind?: string; id?: string }));
     const folderCopy = await clone(folder.id);
     const requestCopy = await clone(request.id);
     unsubscribe();
@@ -311,7 +311,7 @@ describe("cloning an environment", () => {
   it("announces the copy as a created environment", async () => {
     const source = (await ctx.api.post("/api/v1/environments").send({ name: "Dev" }).expect(201)).body;
     const seen: unknown[] = [];
-    const unsubscribe = ctx.events.subscribe((event) => seen.push(event));
+    const unsubscribe = ctx.subscribe((event) => seen.push(event));
     const copy = (await ctx.api.post(`/api/v1/environments/${source.id}/clone`).expect(201)).body;
     unsubscribe();
     expect(seen).toContainEqual(expect.objectContaining({ kind: "environment", id: copy.id, operation: "created" }));

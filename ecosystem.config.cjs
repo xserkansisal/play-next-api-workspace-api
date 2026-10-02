@@ -66,6 +66,8 @@ module.exports = {
         PROXY_TIMEOUT_MS: process.env.PROXY_TIMEOUT_MS || "30000",
         PROXY_MAX_RESPONSE_BYTES: process.env.PROXY_MAX_RESPONSE_BYTES || "10485760",
         PRESENCE_SIMULATOR_ENABLED: "false",
+        // Addresses promoted to system admin on sign-in; only needed to bootstrap the first admin.
+        ...(process.env.ADMIN_EMAILS ? { ADMIN_EMAILS: process.env.ADMIN_EMAILS } : {}),
         // Development-only sign-in shortcut; production refuses to start with it on.
         AUTH_DEV_BYPASS: "false",
       },

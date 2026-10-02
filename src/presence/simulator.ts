@@ -11,6 +11,7 @@ interface SimulatedLocation {
   kind: "collection" | "folder" | "request";
   collectionId: string;
   itemId: string | null;
+  teamId: string;
 }
 
 interface SimulatedUser {
@@ -27,19 +28,19 @@ interface SimulatedUser {
 export async function activePresenceLocations(db: AppDatabase): Promise<SimulatedLocation[]> {
   const [activeCollections, activeItems] = await Promise.all([
     db
-      .select({ collectionId: collections.id })
+      .select({ collectionId: collections.id, teamId: collections.teamId })
       .from(collections)
       .where(isNull(collections.deletedAt)),
     db
-      .select({ collectionId: items.collectionId, itemId: items.id, kind: items.kind })
+      .select({ collectionId: items.collectionId, itemId: items.id, kind: items.kind, teamId: collections.teamId })
       .from(items)
       .innerJoin(collections, eq(items.collectionId, collections.id))
       .where(and(isNull(items.deletedAt), isNull(collections.deletedAt))),
   ]);
 
   return [
-    ...activeCollections.map(({ collectionId }) => ({ kind: "collection" as const, collectionId, itemId: null })),
-    ...activeItems.map(({ collectionId, itemId, kind }) => ({ kind, collectionId, itemId })),
+    ...activeCollections.map(({ collectionId, teamId }) => ({ kind: "collection" as const, collectionId, itemId: null, teamId })),
+    ...activeItems.map(({ collectionId, itemId, kind, teamId }) => ({ kind, collectionId, itemId, teamId })),
   ];
 }
 
@@ -48,7 +49,7 @@ function randomLocation(locations: SimulatedLocation[]): SimulatedLocation | und
   return locations[randomInt(locations.length)];
 }
 
-function sameLocation(left: SimulatedLocation, right: SimulatedLocation): boolean {
+function sameLocation(left: Omit<SimulatedLocation, "teamId">, right: Omit<SimulatedLocation, "teamId">): boolean {
   return left.kind === right.kind && left.collectionId === right.collectionId && left.itemId === right.itemId;
 }
 
@@ -72,7 +73,7 @@ export function startPresenceSimulator(
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
   const locationChangeIntervalMs = options.locationChangeIntervalMs ?? LOCATION_CHANGE_INTERVAL_MS;
   const logger = options.logger ?? ((error: unknown) => console.error("Presence simulator failed:", error));
-  const activeUsers = new Map<string, { clientId: string; firstName: string; lastName: string }>();
+  const activeUsers = new Map<string, { clientId: string; firstName: string; lastName: string; teamId: string }>();
   let running = false;
   let stopped = false;
   let warnedNoUsers = false;
@@ -112,22 +113,25 @@ export function startPresenceSimulator(
       activeUsers.clear();
 
       for (const user of simulatedUsers) {
-        const identity = { clientId: user.clientId, firstName: user.firstName, lastName: user.lastName };
-        activeUsers.set(user.userId, identity);
-        const assigned: SimulatedLocation = {
+        const assigned = locations.find((location) => sameLocation(location, {
           kind: user.locationKind,
           collectionId: user.collectionId,
           itemId: user.itemId,
-        };
-        const assignedIsActive = locations.some((location) => sameLocation(location, assigned));
-        const shouldMove =
-          !assignedIsActive || now - Date.parse(user.locationUpdatedAt) >= locationChangeIntervalMs;
+        }));
+        const shouldMove = !assigned || now - Date.parse(user.locationUpdatedAt) >= locationChangeIntervalMs;
         const location = shouldMove ? randomLocation(locations) : assigned;
 
         if (!location) {
-          presence.heartbeat(user, user.clientId, null, now);
+          presence.heartbeat({ ...user, teamId: "" }, user.clientId, null, now);
           continue;
         }
+        const identity = {
+          clientId: user.clientId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          teamId: location.teamId,
+        };
+        activeUsers.set(user.userId, identity);
 
         if (shouldMove) {
           await db
@@ -140,7 +144,7 @@ export function startPresenceSimulator(
             })
             .where(eq(presenceTestUsers.userId, user.userId));
         }
-        presence.heartbeat(user, user.clientId, toPresenceLocation(location), now);
+        presence.heartbeat({ ...user, teamId: location.teamId }, user.clientId, toPresenceLocation(location), now);
       }
     } catch (error) {
       logger(error);
@@ -160,7 +164,7 @@ export function startPresenceSimulator(
       clearInterval(timer);
       while (running) await new Promise((resolve) => setTimeout(resolve, 5));
       for (const [userId, identity] of activeUsers) {
-        presence.heartbeat({ userId, firstName: identity.firstName, lastName: identity.lastName }, identity.clientId, null);
+        presence.heartbeat({ userId, ...identity }, identity.clientId, null);
       }
       activeUsers.clear();
     },

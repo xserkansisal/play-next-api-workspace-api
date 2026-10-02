@@ -24,6 +24,8 @@ export interface PresenceIdentity {
   userId: string;
   firstName: string;
   lastName: string;
+  /** The team whose collection the location is in; only that team's members see the entry. */
+  teamId: string;
 }
 
 export interface PresenceHubOptions {
@@ -39,6 +41,11 @@ interface PresenceEntry extends PresenceIdentity {
 
 type PresenceListener = (snapshot: PresenceSnapshot) => void;
 
+interface PresenceSubscription {
+  teamId: string;
+  listener: PresenceListener;
+}
+
 function sameLocation(left: Exclude<PresenceLocation, null>, right: Exclude<PresenceLocation, null>): boolean {
   return (
     left.kind === right.kind &&
@@ -50,7 +57,7 @@ function sameLocation(left: Exclude<PresenceLocation, null>, right: Exclude<Pres
 export class PresenceHub {
   readonly ttlMs: number;
   private readonly entries = new Map<string, PresenceEntry>();
-  private readonly listeners = new Set<PresenceListener>();
+  private readonly listeners = new Set<PresenceSubscription>();
   private readonly sweepTimer: NodeJS.Timeout;
   private closed = false;
 
@@ -76,9 +83,10 @@ export class PresenceHub {
     return changed;
   }
 
-  private createSnapshot(): PresenceSnapshot {
+  private createSnapshot(teamId: string): PresenceSnapshot {
     return {
       users: [...this.entries.values()]
+        .filter((entry) => entry.teamId === teamId)
         .sort((left, right) => left.userId.localeCompare(right.userId) || left.clientId.localeCompare(right.clientId))
         .map(({ userId, firstName, lastName, location }) => ({
           userId,
@@ -92,12 +100,17 @@ export class PresenceHub {
   }
 
   private publishSnapshot(): void {
-    const snapshot = this.createSnapshot();
-    for (const listener of [...this.listeners]) {
+    const snapshots = new Map<string, PresenceSnapshot>();
+    for (const subscription of [...this.listeners]) {
+      let snapshot = snapshots.get(subscription.teamId);
+      if (!snapshot) {
+        snapshot = this.createSnapshot(subscription.teamId);
+        snapshots.set(subscription.teamId, snapshot);
+      }
       try {
-        listener(snapshot);
+        subscription.listener(snapshot);
       } catch {
-        this.listeners.delete(listener);
+        this.listeners.delete(subscription);
       }
     }
   }
@@ -117,21 +130,35 @@ export class PresenceHub {
       !previous ||
       previous.firstName !== identity.firstName ||
       previous.lastName !== identity.lastName ||
+      previous.teamId !== identity.teamId ||
       !sameLocation(previous.location, location)
     ) {
       this.publishSnapshot();
     }
   }
 
-  snapshot(now = Date.now()): PresenceSnapshot {
+  snapshot(teamId: string, now = Date.now()): PresenceSnapshot {
     this.expire(now);
-    return this.createSnapshot();
+    return this.createSnapshot(teamId);
   }
 
-  subscribe(listener: PresenceListener): () => void {
+  subscribe(teamId: string, listener: PresenceListener): () => void {
     if (this.closed) return () => {};
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    const subscription = { teamId, listener };
+    this.listeners.add(subscription);
+    return () => this.listeners.delete(subscription);
+  }
+
+  /** Drops the entries of one member of a team, or of everyone in it when `userId` is omitted. */
+  removeTeamMember(teamId: string, userId?: string): void {
+    let changed = false;
+    for (const [key, entry] of this.entries) {
+      if (entry.teamId === teamId && (userId === undefined || entry.userId === userId)) {
+        this.entries.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.publishSnapshot();
   }
 
   async removeInactiveResources(db: AppDatabase): Promise<void> {

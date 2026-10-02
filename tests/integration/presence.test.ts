@@ -156,15 +156,15 @@ describe("live presence", () => {
       heartbeatIntervalMs: 20,
       locationChangeIntervalMs: 200,
     });
-    await waitUntil(() => context.presence.snapshot().users.length === 10);
+    await waitUntil(() => context.presence.snapshot(context.teamId).users.length === 10);
     const stream = await connectReady();
     await stream.waitFor((frames) =>
       presenceFrames(stream).some((snapshot) => snapshot.users.length === 10),
     );
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(context.presence.snapshot().users).toHaveLength(10);
+    expect(context.presence.snapshot(context.teamId).users).toHaveLength(10);
     await simulator.stop();
-    expect(context.presence.snapshot().users).toEqual([]);
+    expect(context.presence.snapshot(context.teamId).users).toEqual([]);
     await stream.waitFor((frames) =>
       presenceFrames(stream).at(-1)?.users.length === 0,
     );

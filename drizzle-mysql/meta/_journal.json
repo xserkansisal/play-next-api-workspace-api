@@ -85,6 +85,41 @@
       "when": 1790897009812,
       "tag": "0011_user_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1790938632217,
+      "tag": "0012_teams_and_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1790939163487,
+      "tag": "0013_team_scoped_resources",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1790942840417,
+      "tag": "0014_seed_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1790943199195,
+      "tag": "0015_move_default_to_game_studio",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1790943588149,
+      "tag": "0016_seed_system_admin",
+      "breakpoints": true
     }
   ]
 }

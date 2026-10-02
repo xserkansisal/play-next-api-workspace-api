@@ -1,7 +1,8 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
+import { guardEnvironmentParam } from "./teamGuards.js";
 import {
   addEnvironmentVariable,
   cloneEnvironment,
@@ -16,14 +17,15 @@ import { environmentInputSchema, environmentVariableCreateInputSchema } from "..
 
 export function createEnvironmentsRouter(db: AppDatabase, events: ChangeEventHub): Router {
   const router = Router();
+  guardEnvironmentParam(router, db);
 
-  router.get("/", async (_req, res) => {
-    res.json({ environments: await listEnvironments(db) });
+  router.get("/", async (req, res) => {
+    res.json({ environments: await listEnvironments(db, requestTeamId(req)) });
   });
 
   router.post("/", async (req, res) => {
-    const environment = await createEnvironment(db, environmentInputSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
+    const environment = await createEnvironment(db, requestTeamId(req), environmentInputSchema.parse(req.body), authenticatedUserId(req));
+    events.publish(requestTeamId(req), { kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
     res.status(201).json(environment);
   });
 
@@ -47,25 +49,25 @@ export function createEnvironmentsRouter(db: AppDatabase, events: ChangeEventHub
       parsed.data,
       authenticatedUserId(req),
     );
-    events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
+    events.publish(requestTeamId(req), { kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
     res.status(201).json(environment);
   });
 
   router.put("/:environmentId", async (req, res) => {
     const environment = await updateEnvironment(db, req.params.environmentId, environmentInputSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
+    events.publish(requestTeamId(req), { kind: "environment", id: environment.id, collectionId: null, operation: "updated", changedAt: environment.updatedAt });
     res.json(environment);
   });
 
   router.post("/:environmentId/clone", async (req, res) => {
     const environment = await cloneEnvironment(db, req.params.environmentId, authenticatedUserId(req));
-    events.publish({ kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
+    events.publish(requestTeamId(req), { kind: "environment", id: environment.id, collectionId: null, operation: "created", changedAt: environment.updatedAt });
     res.status(201).json(environment);
   });
 
   router.delete("/:environmentId", async (req, res) => {
     const trashed = await trashEnvironment(db, req.params.environmentId, authenticatedUserId(req));
-    events.publish({ kind: "environment", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
+    events.publish(requestTeamId(req), { kind: "environment", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
     res.status(204).end();
   });
 

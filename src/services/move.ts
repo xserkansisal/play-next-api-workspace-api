@@ -70,14 +70,17 @@ export function moveItem(
   actorId: string,
 ): Promise<MovedItem> {
   return db.transaction(async (tx) => {
-    if (!(await findActiveCollection(tx, collectionId))) {
+    const source = await findActiveCollection(tx, collectionId);
+    if (!source) {
       throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`, "ITEM_NOT_FOUND");
     }
     const row = await findActiveItem(tx, collectionId, itemId);
     if (!row) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`, "ITEM_NOT_FOUND");
 
     const { targetCollectionId, parentId } = input;
-    if (!(await findActiveCollection(tx, targetCollectionId))) {
+    // A collection of another team is reported exactly like a missing one: items never cross teams.
+    const target = await findActiveCollection(tx, targetCollectionId);
+    if (!target || target.teamId !== source.teamId) {
       throw new NotFoundError(`Collection ${targetCollectionId} not found`, "TARGET_NOT_FOUND");
     }
     if (parentId === itemId) throw invalidMove("An item cannot be moved into itself", { itemId });

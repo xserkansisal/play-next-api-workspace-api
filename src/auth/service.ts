@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Env } from "../config/env.js";
+import { parseEmailList } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { first } from "../db/query.js";
 import { authCodes, authRateLimits, authSessions, userAvatars, users } from "../db/schema.js";
@@ -12,6 +13,8 @@ import type { AvatarColor } from "./avatar.js";
 
 export const ALLOWED_EMAIL_DOMAINS = ["fluttersea.com", "sisal.com", "sisal.it"] as const;
 
+export type SystemRole = "user" | "admin";
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -20,6 +23,7 @@ export interface AuthUser {
   avatarColor: string;
   /** Id of the stored avatar image, or null when the user has none. Clients see it as `avatarUrl`. */
   avatarId: string | null;
+  systemRole: SystemRole;
 }
 
 const authUserColumns = {
@@ -29,6 +33,7 @@ const authUserColumns = {
   lastName: users.lastName,
   avatarColor: users.avatarColor,
   avatarId: userAvatars.id,
+  systemRole: users.systemRole,
 };
 
 export class AuthError extends HttpError {
@@ -99,6 +104,7 @@ export interface AuthServiceConfig extends Pick<
   | "AUTH_CODE_VERIFY_LIMIT"
   | "AUTH_CODE_VERIFY_WINDOW_SECONDS"
   | "AUTH_SESSION_TTL_SECONDS"
+  | "ADMIN_EMAILS"
 > {}
 
 export interface RequestedCode {
@@ -160,14 +166,20 @@ async function openSession(
   sessionToken: string,
   sessionExpiresAt: string,
   now: string,
+  adminEmails: string | undefined,
 ): Promise<VerifiedSession> {
   const profileName = deriveUserProfileName(email);
   await tx
     .insert(users)
     .values({ id: randomUUID(), email, ...profileName, createdAt: now })
     .onDuplicateKeyUpdate({ set: { email } });
-  const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
+  let user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
   if (!user) throw new Error("User row disappeared while a verified session was being created");
+  // Bootstrap only: promotes listed addresses, never demotes, so the admin API stays authoritative.
+  if (user.systemRole !== "admin" && parseEmailList(adminEmails).includes(email)) {
+    await tx.update(users).set({ systemRole: "admin" }).where(eq(users.id, user.id));
+    user = { ...user, systemRole: "admin" };
+  }
   const avatar = await first(tx.select({ id: userAvatars.id }).from(userAvatars).where(eq(userAvatars.userId, user.id)).limit(1));
   const firstName = user.firstName || profileName.firstName;
   const lastName = user.lastName || profileName.lastName;
@@ -183,7 +195,15 @@ async function openSession(
     expiresAt: sessionExpiresAt,
   });
   return {
-    user: { id: user.id, email: user.email, firstName, lastName, avatarColor: user.avatarColor, avatarId: avatar?.id ?? null },
+    user: {
+      id: user.id,
+      email: user.email,
+      firstName,
+      lastName,
+      avatarColor: user.avatarColor,
+      avatarId: avatar?.id ?? null,
+      systemRole: user.systemRole,
+    },
     sessionToken,
     expiresAt: sessionExpiresAt,
   };
@@ -195,13 +215,15 @@ async function openSession(
  */
 export async function createSessionForEmail(
   db: AppDatabase,
-  config: Pick<AuthServiceConfig, "AUTH_SESSION_TTL_SECONDS">,
+  config: Pick<AuthServiceConfig, "AUTH_SESSION_TTL_SECONDS" | "ADMIN_EMAILS">,
   inputEmail: string,
 ): Promise<VerifiedSession> {
   const email = validateAllowedEmail(inputEmail);
   const nowDate = new Date();
   const sessionExpiresAt = isoAfter(config.AUTH_SESSION_TTL_SECONDS, nowDate.getTime());
-  return db.transaction((tx) => openSession(tx, email, generateSessionToken(), sessionExpiresAt, nowDate.toISOString()));
+  return db.transaction((tx) =>
+    openSession(tx, email, generateSessionToken(), sessionExpiresAt, nowDate.toISOString(), config.ADMIN_EMAILS),
+  );
 }
 
 export async function verifyCode(
@@ -260,7 +282,7 @@ export async function verifyCode(
 
     await tx.update(authCodes).set({ attempts: nextAttempts, consumedAt: now }).where(eq(authCodes.id, challenge.id));
 
-    return { ok: true, session: await openSession(tx, email, generatedSessionToken, sessionExpiresAt, now) };
+    return { ok: true, session: await openSession(tx, email, generatedSessionToken, sessionExpiresAt, now, config.ADMIN_EMAILS) };
   });
 }
 

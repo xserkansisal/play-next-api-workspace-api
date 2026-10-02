@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
-import { createTestContext, type TestContext } from "../helpers.js";
+import { addTeamMembership, createTestContext, type TestContext } from "../helpers.js";
 
 let upstream: http.Server;
 let upstreamPort: number;
@@ -95,6 +95,7 @@ pm.test("uses the captured token", () => pm.expect(pm.response.json().receivedHe
     const message = ctx.emailSender.getMessage("runner-viewer@sisal.com");
     if (!message) throw new Error("Test email sender did not retain the second user's code");
     await anotherUser.post("/api/v1/auth/verify-code").send({ email: message.to, code: message.code }).expect(200);
+    await addTeamMembership(ctx.db, "runner-viewer@sisal.com", ctx.teamId);
     expect((await anotherUser.get(`/api/v1/collections/${collection.id}/runs`).expect(200)).body.total).toBe(0);
     await anotherUser.get(`/api/v1/collections/${collection.id}/runs/${run.id}`).expect(404);
   });

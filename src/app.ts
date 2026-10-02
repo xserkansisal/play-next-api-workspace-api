@@ -4,7 +4,11 @@ import type { AppDatabase } from "./db/client.js";
 import { ChangeEventHub } from "./events/hub.js";
 import { PresenceHub } from "./events/presence.js";
 import { MemoryEmailCodeSender, SmtpEmailCodeSender, type EmailCodeSender } from "./auth/email.js";
-import { createAuthenticationMiddleware } from "./middleware/authenticate.js";
+import {
+  createAuthenticationMiddleware,
+  createTeamContextMiddleware,
+  requireSystemAdmin,
+} from "./middleware/authenticate.js";
 import { createCorsMiddleware } from "./middleware/cors.js";
 import { createErrorHandler, notFoundHandler, type ErrorHandlerOptions } from "./middleware/errorHandler.js";
 import { createCollectionsRouter } from "./routes/collections.js";
@@ -18,6 +22,8 @@ import { createProxyRouter } from "./routes/proxy.js";
 import { createTrashRouter } from "./routes/trash.js";
 import { createPreferencesRouter } from "./routes/preferences.js";
 import { createPresenceRouter } from "./routes/presence.js";
+import { createAdminRouter } from "./routes/admin.js";
+import { createTeamsRouter } from "./routes/teams.js";
 import type { CollectionsRouterOptions } from "./routes/collections.js";
 import { IMPORT_BODY_LIMIT } from "./validation/schemas.js";
 
@@ -63,6 +69,7 @@ export function createApp({
 
   app.use("/health", createHealthRouter());
   const requireAuth = createAuthenticationMiddleware(db, env.AUTH_COOKIE_NAME);
+  const requireTeam = createTeamContextMiddleware(db);
   app.use(
     "/api/v1/preferences",
     express.json({ limit: "256kb" }),
@@ -77,16 +84,19 @@ export function createApp({
   app.use(
     "/api/v1/events",
     requireAuth,
+    requireTeam,
     createEventsRouter(events, presence, db, { heartbeatMs: env.SSE_HEARTBEAT_MS, retryMs: env.SSE_RETRY_MS }),
   );
 
-  app.use("/api/v1/presence", requireAuth, createPresenceRouter(db, presence));
-  app.use("/api/v1/collections", requireAuth, createCollectionRunsRouter(db, env));
-  app.use("/api/v1/collections", requireAuth, createCollectionsRouter(db, events, collectionsOptions));
-  app.use("/api/v1/environments", requireAuth, createEnvironmentsRouter(db, events));
-  app.use("/api/v1/variables", requireAuth, createVariablesRouter(db, events));
-  app.use("/api/v1/trash", requireAuth, createTrashRouter(db, events));
+  app.use("/api/v1/presence", requireAuth, requireTeam, createPresenceRouter(db, presence));
+  app.use("/api/v1/collections", requireAuth, requireTeam, createCollectionRunsRouter(db, env));
+  app.use("/api/v1/collections", requireAuth, requireTeam, createCollectionsRouter(db, events, collectionsOptions));
+  app.use("/api/v1/environments", requireAuth, requireTeam, createEnvironmentsRouter(db, events));
+  app.use("/api/v1/variables", requireAuth, requireTeam, createVariablesRouter(db, events));
+  app.use("/api/v1/trash", requireAuth, requireTeam, createTrashRouter(db, events));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
+  app.use("/api/v1/teams", requireAuth, createTeamsRouter(db));
+  app.use("/api/v1/admin", requireAuth, requireSystemAdmin, createAdminRouter(db, { events, presence }));
 
   app.use(notFoundHandler);
   app.use(createErrorHandler({ exposeInternalErrors: env.NODE_ENV !== "production", logger }));

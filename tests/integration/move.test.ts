@@ -181,8 +181,9 @@ describe("rejected moves", () => {
     const unknownItem = await move(collection.id, missing, { targetCollectionId: collection.id, parentId: null }).expect(404);
     expect(unknownItem.body.error.code).toBe("ITEM_NOT_FOUND");
 
+    // The team guard answers for the collection before the item is looked up.
     const unknownCollection = await move(missing, orders.id, { targetCollectionId: collection.id, parentId: null }).expect(404);
-    expect(unknownCollection.body.error.code).toBe("ITEM_NOT_FOUND");
+    expect(unknownCollection.body.error.code).toBe("NOT_FOUND");
 
     const unknownTarget = await move(collection.id, orders.id, { targetCollectionId: missing, parentId: null }).expect(404);
     expect(unknownTarget.body.error.code).toBe("TARGET_NOT_FOUND");
@@ -287,7 +288,7 @@ describe("move change events", () => {
     const users = find(source.items, "Users");
 
     const seen: SequencedChangeEvent[] = [];
-    const unsubscribe = ctx.events.subscribe((event) => seen.push(event));
+    const unsubscribe = ctx.subscribe((event) => seen.push(event));
 
     await move(source.id, orders.id, { targetCollectionId: source.id, parentId: users.id }).expect(200);
     expect(seen).toEqual([

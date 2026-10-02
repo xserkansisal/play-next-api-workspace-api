@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectSse, startServer } from "../sse.js";
-import { createTestContext, dropTestDatabase, queryRows, type TestContext } from "../helpers.js";
+import { addTeamMembership, createTestContext, dropTestDatabase, queryRows, type TestContext } from "../helpers.js";
 import { MemoryEmailCodeSender } from "../../src/auth/email.js";
 import sharp from "sharp";
 
@@ -391,6 +391,7 @@ describe("email code sign-in", () => {
     const context = await setup();
     const message = await issueCode(context);
     const login = await verify(context, message.to, message.code).expect(200);
+    await addTeamMembership(context.db, message.to, context.teamId);
     const server = await startServer(context.app);
     const stream = await connectSse(server.url, { Cookie: cookiePair(setCookieHeader(login)) });
     try {
@@ -417,6 +418,8 @@ describe("email code sign-in", () => {
     const updaterMessage = await issueCode(context, "updater@sisal.it");
     const updaterLogin = await verify(context, updaterMessage.to, updaterMessage.code).expect(200);
     const updaterCookie = cookiePair(setCookieHeader(updaterLogin));
+    await addTeamMembership(context.db, creatorMessage.to, context.teamId);
+    await addTeamMembership(context.db, updaterMessage.to, context.teamId);
     const client = context.unauthenticatedApi;
     const collection = await client
       .post("/api/v1/collections")
@@ -458,10 +461,11 @@ describe("email code sign-in", () => {
     const context = await setup();
     const message = await issueCode(context);
     const login = await verify(context, message.to, message.code).expect(200);
+    await addTeamMembership(context.db, message.to, context.teamId);
     const timestamp = new Date().toISOString();
     await context.db.$client.query(
-      "INSERT INTO collections (id, name, name_key, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ["00000000-0000-4000-8000-000000000001", "Legacy", "legacy", "", timestamp, timestamp],
+      "INSERT INTO collections (id, team_id, name, name_key, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["00000000-0000-4000-8000-000000000001", context.teamId, "Legacy", "legacy", "", timestamp, timestamp],
     );
     const collection = await context.unauthenticatedApi
       .get("/api/v1/collections/00000000-0000-4000-8000-000000000001")

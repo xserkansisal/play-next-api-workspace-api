@@ -59,12 +59,24 @@ async function lockActiveCollection(db: DbExecutor, id: string): Promise<Collect
   return row;
 }
 
-export async function findActiveCollectionByName(db: DbExecutor, name: string, excludeId?: string): Promise<CollectionRow | undefined> {
+/** Names are unique among a team's active collections; other teams may reuse them. */
+export async function findActiveCollectionByName(
+  db: DbExecutor,
+  teamId: string,
+  name: string,
+  excludeId?: string,
+): Promise<CollectionRow | undefined> {
   const rows = await db
     .select()
     .from(collections)
-    .where(and(eq(collections.nameKey, nameKey(name)), isNull(collections.deletedAt)));
+    .where(and(eq(collections.teamId, teamId), eq(collections.nameKey, nameKey(name)), isNull(collections.deletedAt)));
   return rows.find((row) => row.id !== excludeId);
+}
+
+/** Whether a collection - active or in Trash - belongs to the team. */
+export async function collectionBelongsToTeam(db: DbExecutor, teamId: string, id: string): Promise<boolean> {
+  const row = await first(db.select({ teamId: collections.teamId }).from(collections).where(eq(collections.id, id)).limit(1));
+  return row?.teamId === teamId;
 }
 
 export function collectionNameConflictError(name: string, existingId: string): ConflictError {
@@ -74,11 +86,11 @@ export function collectionNameConflictError(name: string, existingId: string): C
   });
 }
 
-export async function listCollections(db: AppDatabase): Promise<CollectionSummary[]> {
+export async function listCollections(db: AppDatabase, teamId: string): Promise<CollectionSummary[]> {
   const rows = await db
     .select()
     .from(collections)
-    .where(isNull(collections.deletedAt));
+    .where(and(eq(collections.teamId, teamId), isNull(collections.deletedAt)));
   return (await Promise.all(rows.map((row) => toSummary(db, row)))).sort(compareByName);
 }
 
@@ -97,7 +109,7 @@ export async function restoreCollectionVersion(
     const current = await lockActiveCollection(tx, id);
     const version = await findCollectionVersion(tx, id, versionId);
     const snapshot = version.snapshot;
-    const existing = await findActiveCollectionByName(tx, snapshot.name, id);
+    const existing = await findActiveCollectionByName(tx, current.teamId, snapshot.name, id);
     if (existing) throw collectionNameConflictError(snapshot.name, existing.id);
 
     await recordCollectionVersion(tx, id, { name: current.name, description: current.description, auth: current.authConfig }, actorId);
@@ -122,9 +134,14 @@ export async function readCollection(db: DbExecutor, id: string): Promise<Collec
   return { ...summary, auth: row.authConfig, items: tree.roots };
 }
 
-export function createCollection(db: AppDatabase, input: CreateCollectionInput, actorId: string): Promise<CollectionAggregate> {
+export function createCollection(
+  db: AppDatabase,
+  teamId: string,
+  input: CreateCollectionInput,
+  actorId: string,
+): Promise<CollectionAggregate> {
   return db.transaction(async (tx) => {
-      const existing = await findActiveCollectionByName(tx, input.name);
+      const existing = await findActiveCollectionByName(tx, teamId, input.name);
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
       const id = newId();
@@ -136,6 +153,7 @@ export function createCollection(db: AppDatabase, input: CreateCollectionInput, 
           nameKey: nameKey(input.name),
           description: input.description,
           authConfig: input.auth,
+          teamId,
           createdAt: timestamp,
           updatedAt: timestamp,
           createdBy: actorId,
@@ -151,7 +169,7 @@ export function createCollection(db: AppDatabase, input: CreateCollectionInput, 
 export function updateCollection(db: AppDatabase, id: string, input: UpdateCollectionInput, actorId: string): Promise<CollectionSummary> {
   return db.transaction(async (tx) => {
       const current = await lockActiveCollection(tx, id);
-      const existing = await findActiveCollectionByName(tx, input.name, id);
+      const existing = await findActiveCollectionByName(tx, current.teamId, input.name, id);
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
       await recordCollectionVersion(tx, id, { name: current.name, description: current.description, auth: current.authConfig }, actorId);

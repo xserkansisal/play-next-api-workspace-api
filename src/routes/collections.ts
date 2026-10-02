@@ -1,7 +1,8 @@
 import { Router } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
+import { guardCollectionParam } from "./teamGuards.js";
 import {
   createCollection,
   getCollectionVersions,
@@ -41,14 +42,15 @@ const MAX_ROOT_EVENTS = 50;
 export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub, options: CollectionsRouterOptions = {}): Router {
   const router = Router();
   const importRateLimit = createUserRateLimit(options.importRateLimit ?? { limit: 10, windowMs: 60_000 });
+  guardCollectionParam(router, db);
 
-  router.get("/", async (_req, res) => {
-    res.json({ collections: await listCollections(db) });
+  router.get("/", async (req, res) => {
+    res.json({ collections: await listCollections(db, requestTeamId(req)) });
   });
 
   router.post("/", async (req, res) => {
-    const collection = await createCollection(db, createCollectionSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
+    const collection = await createCollection(db, requestTeamId(req), createCollectionSchema.parse(req.body), authenticatedUserId(req));
+    events.publish(requestTeamId(req), { kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
     res.status(201).json(collection);
   });
 
@@ -67,25 +69,25 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
       req.params.versionId,
       authenticatedUserId(req),
     );
-    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
+    events.publish(requestTeamId(req), { kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
     res.json(collection);
   });
 
   router.put("/:collectionId", async (req, res) => {
     const collection = await updateCollection(db, req.params.collectionId, updateCollectionSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
+    events.publish(requestTeamId(req), { kind: "collection", id: collection.id, collectionId: null, operation: "updated", changedAt: collection.updatedAt });
     res.json(collection);
   });
 
   router.delete("/:collectionId", async (req, res) => {
     const trashed = await trashCollection(db, req.params.collectionId, authenticatedUserId(req));
-    events.publish({ kind: "collection", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
+    events.publish(requestTeamId(req), { kind: "collection", id: trashed.id, collectionId: null, operation: "trashed", changedAt: trashed.deletedAt });
     res.status(204).end();
   });
 
   router.post("/:collectionId/clone", async (req, res) => {
     const collection = await cloneCollection(db, req.params.collectionId, authenticatedUserId(req));
-    events.publish({ kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
+    events.publish(requestTeamId(req), { kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
     res.status(201).json(collection);
   });
 
@@ -107,10 +109,10 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
     const result = await importItems(db, req.params.collectionId as string, input, authenticatedUserId(req));
     if (!result.dryRun) {
       if (result.roots.length > MAX_ROOT_EVENTS) {
-        events.publish({ kind: "collection", id: result.collectionId, collectionId: null, operation: "updated", changedAt: result.changedAt });
+        events.publish(requestTeamId(req), { kind: "collection", id: result.collectionId, collectionId: null, operation: "updated", changedAt: result.changedAt });
       } else {
         for (const root of result.roots) {
-          events.publish({ kind: root.kind, id: root.id, collectionId: result.collectionId, operation: "created", changedAt: result.changedAt });
+          events.publish(requestTeamId(req), { kind: root.kind, id: root.id, collectionId: result.collectionId, operation: "created", changedAt: result.changedAt });
         }
       }
     }
@@ -119,7 +121,7 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
 
   router.post("/:collectionId/items", async (req, res) => {
     const item = await createItem(db, req.params.collectionId, createItemSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
+    events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
     res.status(201).json(item);
   });
 
@@ -139,19 +141,19 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
       req.params.versionId,
       authenticatedUserId(req),
     );
-    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
+    events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
     res.json(item);
   });
 
   router.put("/:collectionId/items/:itemId", async (req, res) => {
     const item = await updateItem(db, req.params.collectionId, req.params.itemId, updateItemSchema.parse(req.body), authenticatedUserId(req));
-    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
+    events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: item.collectionId, operation: "updated", changedAt: item.updatedAt });
     res.json(item);
   });
 
   router.post("/:collectionId/items/:itemId/clone", async (req, res) => {
     const item = await cloneItem(db, req.params.collectionId, req.params.itemId, authenticatedUserId(req));
-    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
+    events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: item.collectionId, operation: "created", changedAt: item.updatedAt });
     res.status(201).json(item);
   });
 
@@ -163,18 +165,18 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
       moveItemSchema.parse(req.body),
       authenticatedUserId(req),
     );
-    events.publish({ kind: item.type, id: item.id, collectionId: item.collectionId, operation: "move", changedAt: item.updatedAt });
+    events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: item.collectionId, operation: "move", changedAt: item.updatedAt });
     // A move across collections changes two trees. A tab showing only the source would otherwise
     // keep the item under its old parent until something else made it refetch.
     if (sourceCollectionId !== item.collectionId) {
-      events.publish({ kind: item.type, id: item.id, collectionId: sourceCollectionId, operation: "move", changedAt: item.updatedAt });
+      events.publish(requestTeamId(req), { kind: item.type, id: item.id, collectionId: sourceCollectionId, operation: "move", changedAt: item.updatedAt });
     }
     res.json(item);
   });
 
   router.delete("/:collectionId/items/:itemId", async (req, res) => {
     const trashed = await trashItem(db, req.params.collectionId, req.params.itemId, authenticatedUserId(req));
-    events.publish({
+    events.publish(requestTeamId(req), {
       kind: trashed.kind,
       id: trashed.id,
       collectionId: trashed.collectionId,

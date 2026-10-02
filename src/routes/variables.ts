@@ -1,8 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import { BadRequestError } from "../errors.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
 import {
   createVariable,
   deleteVariable,
@@ -11,6 +11,7 @@ import {
   setVariable,
   setVariableDisplayOrder,
   updateVariable,
+  type VariableActor,
 } from "../services/variables.js";
 import {
   variableDisplayOrderSchema,
@@ -25,7 +26,7 @@ export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): 
   const router = Router();
 
   router.get("/", async (req, res) => {
-    res.json({ variables: await listVariables(db, authenticatedUserId(req)) });
+    res.json({ variables: await listVariables(db, actorOf(req)) });
   });
 
   router.get("/order", async (req, res) => {
@@ -48,12 +49,12 @@ export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): 
         parsed.error.issues,
       );
     }
-    const userId = authenticatedUserId(req);
-    const variable = await createVariable(db, userId, scope, parsed.data.key, parsed.data.value);
+    const actor = actorOf(req);
+    const variable = await createVariable(db, actor, scope, parsed.data.key, parsed.data.value);
     if (scope === "global") {
-      publishIfShared(events, scope, variable.key, variable.updatedAt, "created");
+      publishIfShared(events, actor.teamId, scope, variable.key, variable.updatedAt, "created");
     } else {
-      events.publishToUser(userId, {
+      events.publishToUser(actor.userId, {
         kind: "variable",
         id: variable.key,
         collectionId: null,
@@ -68,8 +69,9 @@ export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): 
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
     const { value } = variableInputSchema.parse(req.body);
-    const variable = await setVariable(db, authenticatedUserId(req), scope, key, value);
-    publishIfShared(events, variable.scope, key, variable.updatedAt, "updated");
+    const actor = actorOf(req);
+    const variable = await setVariable(db, actor, scope, key, value);
+    publishIfShared(events, actor.teamId, variable.scope, key, variable.updatedAt, "updated");
     res.json(variable);
   });
 
@@ -77,19 +79,21 @@ export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): 
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
     const patch = variablePatchSchema.parse(req.body);
-    const variable = await updateVariable(db, authenticatedUserId(req), scope, key, patch);
+    const actor = actorOf(req);
+    const variable = await updateVariable(db, actor, scope, key, patch);
     if (patch.key !== undefined && patch.key !== key) {
-      publishIfShared(events, scope, key, variable.updatedAt, "trashed");
+      publishIfShared(events, actor.teamId, scope, key, variable.updatedAt, "trashed");
     }
-    publishIfShared(events, scope, variable.key, variable.updatedAt, "updated");
+    publishIfShared(events, actor.teamId, scope, variable.key, variable.updatedAt, "updated");
     res.json(variable);
   });
 
   router.delete("/:scope/:key", async (req, res) => {
     const scope = variableScopeSchema.parse(req.params.scope);
     const key = variableKeySchema.parse(req.params.key);
-    await deleteVariable(db, authenticatedUserId(req), scope, key);
-    publishIfShared(events, scope, key, new Date().toISOString(), "trashed");
+    const actor = actorOf(req);
+    await deleteVariable(db, actor, scope, key);
+    publishIfShared(events, actor.teamId, scope, key, new Date().toISOString(), "trashed");
     res.status(204).end();
   });
 
@@ -97,18 +101,23 @@ export function createVariablesRouter(db: AppDatabase, events: ChangeEventHub): 
 }
 
 /**
- * Only global writes are announced.
+ * Only global writes are announced, and only to the team that owns them.
  *
  * A user-scope value concerns exactly one person, and broadcasting it would both cause every other
  * client to refetch for nothing and tell the whole team which keys that person holds.
  */
+function actorOf(req: Request): VariableActor {
+  return { userId: authenticatedUserId(req), teamId: requestTeamId(req) };
+}
+
 function publishIfShared(
   events: ChangeEventHub,
+  teamId: string,
   scope: string,
   key: string,
   changedAt: string,
   operation: "created" | "updated" | "trashed",
 ): void {
   if (scope !== "global") return;
-  events.publish({ kind: "variable", id: key, collectionId: null, operation, changedAt });
+  events.publish(teamId, { kind: "variable", id: key, collectionId: null, operation, changedAt });
 }

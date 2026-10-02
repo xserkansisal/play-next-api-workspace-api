@@ -52,16 +52,17 @@ export type RestoredResource =
 
 type ItemRow = typeof items.$inferSelect;
 
-type TrashRoot =
+type TrashRoot = { teamId: string } & (
   | { kind: "collection"; row: typeof collections.$inferSelect }
   | { kind: "item"; row: ItemRow }
-  | { kind: "environment"; row: typeof environments.$inferSelect };
+  | { kind: "environment"; row: typeof environments.$inferSelect }
+);
 
 /** Lists deleted roots that can be restored now (item roots whose container is active). */
-export async function listTrash(db: AppDatabase): Promise<TrashEntry[]> {
+export async function listTrash(db: AppDatabase, teamId: string): Promise<TrashEntry[]> {
   const entries: TrashEntry[] = [];
 
-  for (const row of await db.select().from(collections).where(isNotNull(collections.deletedAt))) {
+  for (const row of await db.select().from(collections).where(and(eq(collections.teamId, teamId), isNotNull(collections.deletedAt)))) {
     entries.push({ id: row.id, kind: "collection", name: row.name, collectionId: null, parentId: null, deletedAt: row.deletedAt! });
   }
 
@@ -71,9 +72,10 @@ export async function listTrash(db: AppDatabase): Promise<TrashEntry[]> {
     JOIN collections c ON c.id = i.collection_id
     LEFT JOIN items p ON p.id = i.parent_id
     WHERE i.trash_root_id = i.id
+      AND c.team_id = ?
       AND c.deleted_at IS NULL
       AND (i.parent_id IS NULL OR p.deleted_at IS NULL)
-  `);
+  `, [teamId]);
   const typedItemRoots = itemRoots as Array<{
     id: string;
     kind: "folder" | "request";
@@ -93,34 +95,36 @@ export async function listTrash(db: AppDatabase): Promise<TrashEntry[]> {
     });
   }
 
-  for (const row of await db.select().from(environments).where(isNotNull(environments.deletedAt))) {
+  for (const row of await db.select().from(environments).where(and(eq(environments.teamId, teamId), isNotNull(environments.deletedAt)))) {
     entries.push({ id: row.id, kind: "environment", name: row.name, collectionId: null, parentId: null, deletedAt: row.deletedAt! });
   }
 
   return entries.sort((a, b) => (a.deletedAt === b.deletedAt ? a.id.localeCompare(b.id) : a.deletedAt < b.deletedAt ? 1 : -1));
 }
 
-async function findTrashRoot(db: DbExecutor, id: string): Promise<TrashRoot> {
+// Another team's Trash entry is reported exactly like a missing one.
+async function findTrashRoot(db: DbExecutor, teamId: string, id: string): Promise<TrashRoot> {
   const collection = await first(db
     .select()
     .from(collections)
-    .where(and(eq(collections.id, id), isNotNull(collections.deletedAt)))
+    .where(and(eq(collections.id, id), eq(collections.teamId, teamId), isNotNull(collections.deletedAt)))
     .limit(1));
-  if (collection) return { kind: "collection", row: collection };
+  if (collection) return { kind: "collection", row: collection, teamId };
 
   const item = await first(db
-    .select()
+    .select({ item: items })
     .from(items)
-    .where(and(eq(items.id, id), eq(items.trashRootId, id)))
+    .innerJoin(collections, eq(items.collectionId, collections.id))
+    .where(and(eq(items.id, id), eq(items.trashRootId, id), eq(collections.teamId, teamId)))
     .limit(1));
-  if (item) return { kind: "item", row: item };
+  if (item) return { kind: "item", row: item.item, teamId };
 
   const environment = await first(db
     .select()
     .from(environments)
-    .where(and(eq(environments.id, id), isNotNull(environments.deletedAt)))
+    .where(and(eq(environments.id, id), eq(environments.teamId, teamId), isNotNull(environments.deletedAt)))
     .limit(1));
-  if (environment) return { kind: "environment", row: environment };
+  if (environment) return { kind: "environment", row: environment, teamId };
 
   throw new NotFoundError(`Trash item ${id} not found`);
 }
@@ -164,7 +168,7 @@ async function analyze(db: DbExecutor, root: TrashRoot, input: RestoreInput) {
   const conflicts: RestoreConflict[] = [];
   if (root.kind === "collection") {
     const name = input.collectionName ?? root.row.name;
-    const existing = await findActiveCollectionByName(db, name, root.row.id);
+    const existing = await findActiveCollectionByName(db, root.teamId, name, root.row.id);
     if (existing) {
       conflicts.push({ id: root.row.id, kind: "collection", name, collectionId: null, parentId: null, conflictingId: existing.id });
     }
@@ -172,7 +176,7 @@ async function analyze(db: DbExecutor, root: TrashRoot, input: RestoreInput) {
 
   if (root.kind === "environment") {
     const name = overrides.get(root.row.id) ?? root.row.name;
-    const existing = await findActiveEnvironmentByName(db, name, root.row.id);
+    const existing = await findActiveEnvironmentByName(db, root.teamId, name, root.row.id);
     if (existing) {
       conflicts.push({ id: root.row.id, kind: "environment", name, collectionId: null, parentId: null, conflictingId: existing.id });
     }
@@ -195,9 +199,9 @@ async function analyze(db: DbExecutor, root: TrashRoot, input: RestoreInput) {
   return { overrides, restoreRows, blocker, conflicts };
 }
 
-export function checkRestore(db: AppDatabase, id: string, input: RestoreInput): Promise<RestoreCheckResult> {
+export function checkRestore(db: AppDatabase, teamId: string, id: string, input: RestoreInput): Promise<RestoreCheckResult> {
   return db.transaction(async (tx) => {
-    const root = await findTrashRoot(tx, id);
+    const root = await findTrashRoot(tx, teamId, id);
     const { blocker, conflicts } = await analyze(tx, root, input);
     return {
       id,
@@ -216,9 +220,15 @@ export interface RestoreOutcome {
 }
 
 /** Restores a Trash root and its whole subtree atomically, applying name overrides. */
-export function restoreFromTrash(db: AppDatabase, id: string, input: RestoreInput, actorId: string): Promise<RestoreOutcome> {
+export function restoreFromTrash(
+  db: AppDatabase,
+  teamId: string,
+  id: string,
+  input: RestoreInput,
+  actorId: string,
+): Promise<RestoreOutcome> {
   return db.transaction(async (tx) => {
-      const root = await findTrashRoot(tx, id);
+      const root = await findTrashRoot(tx, teamId, id);
       const { overrides, restoreRows, blocker, conflicts } = await analyze(tx, root, input);
       if (blocker) throw new ConflictError(blocker.message, "RESTORE_BLOCKED", { blocker });
       if (conflicts.length > 0) {

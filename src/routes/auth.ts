@@ -40,6 +40,7 @@ type AuthEnv = Pick<
   | "AUTH_DEV_INBOX_TOKEN"
   | "AUTH_DEV_BYPASS"
   | "CORS_ORIGIN"
+  | "ADMIN_EMAILS"
 >;
 
 const AVATAR_PATH = "/api/v1/auth/avatars";

@@ -79,6 +79,7 @@ describe("PM2 ecosystem configuration", () => {
       PROXY_MAX_RESPONSE_BYTES: "10485760",
       PRESENCE_SIMULATOR_ENABLED: "false",
       AUTH_DEV_BYPASS: "false",
+      ADMIN_EMAILS: "admin@sisal.com",
     };
 
     const { env } = loadConfig(exported);

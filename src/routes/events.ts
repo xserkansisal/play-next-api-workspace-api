@@ -2,7 +2,7 @@ import { Router, type Response } from "express";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub, SequencedChangeEvent } from "../events/hub.js";
 import type { PresenceHub, PresenceSnapshot } from "../events/presence.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
 
 export interface EventsRouterOptions {
   heartbeatMs: number;
@@ -31,7 +31,8 @@ export function createEventsRouter(
 
   router.get("/", async (req, res: Response, next) => {
     try {
-      const userId = authenticatedUserId(req);
+      // One stream watches one team; switching teams means opening a new stream.
+      const subscriber = { userId: authenticatedUserId(req), teamId: requestTeamId(req) };
       if (hub.isClosed) {
         res.status(503).set("Retry-After", String(Math.ceil(options.retryMs / 1000))).end();
         return;
@@ -75,7 +76,7 @@ export function createEventsRouter(
       const lastEventId =
         req.get("Last-Event-ID") ?? (typeof req.query.lastEventId === "string" ? req.query.lastEventId : undefined);
       if (lastEventId) {
-        const replay = hub.replaySince(lastEventId, userId);
+        const replay = hub.replaySince(lastEventId, subscriber);
         if (replay.complete) {
           for (const event of replay.events) write(formatEvent(event));
         } else {
@@ -88,10 +89,11 @@ export function createEventsRouter(
       if (closed) return;
 
       // Replay and subscribe run in the same synchronous turn, so no event can fall between them.
-      unsubscribe = hub.subscribe((event) => write(formatEvent(event)), userId);
-      write(formatPresence(presence.snapshot()));
+      // Revoked when the user leaves the team or the team is archived.
+      unsubscribe = hub.subscribe((event) => write(formatEvent(event)), subscriber, end);
+      write(formatPresence(presence.snapshot(subscriber.teamId)));
       if (closed) return;
-      unsubscribePresence = presence.subscribe((snapshot) => write(formatPresence(snapshot)));
+      unsubscribePresence = presence.subscribe(subscriber.teamId, (snapshot) => write(formatPresence(snapshot)));
       heartbeat = setInterval(() => write(`: heartbeat ${new Date().toISOString()}\n\n`), options.heartbeatMs);
       heartbeat.unref();
       offClose = hub.onClose(end);

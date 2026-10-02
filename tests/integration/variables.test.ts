@@ -1,6 +1,6 @@
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestContext, type TestContext } from "../helpers.js";
+import { addTeamMembership, createTestContext, type TestContext } from "../helpers.js";
 
 async function signInAs(ctx: TestContext, email: string) {
   const agent = request.agent(ctx.app);
@@ -8,6 +8,7 @@ async function signInAs(ctx: TestContext, email: string) {
   const message = ctx.emailSender.getMessage(email);
   if (!message) throw new Error(`No code was sent to ${email}`);
   await agent.post("/api/v1/auth/verify-code").send({ email, code: message.code }).expect(200);
+  await addTeamMembership(ctx.db, email, ctx.teamId);
   return agent;
 }
 
@@ -207,7 +208,7 @@ describe("scoped variables", () => {
 
   it("announces a global write but never a personal one", async () => {
     const seen: string[] = [];
-    const unsubscribe = ctx.events.subscribe((event) => {
+    const unsubscribe = ctx.subscribe((event) => {
       if (event.kind === "variable") seen.push(`${event.operation}:${event.id}`);
     });
     try {

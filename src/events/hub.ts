@@ -27,14 +27,31 @@ export interface ReplayResult {
   events: SequencedChangeEvent[];
 }
 
+/**
+ * Who receives an event: everyone working in one team, or one person whichever team they are in
+ * (their private variables are not tied to a team).
+ */
+export type ChangeAudience = { teamId: string } | { userId: string };
+
+/** The stream a subscriber has open: who they are and the team they are watching. */
+export interface ChangeSubscriber {
+  userId: string;
+  teamId: string;
+}
+
 interface BufferedChangeEvent {
   event: SequencedChangeEvent;
-  audienceUserId?: string;
+  audience: ChangeAudience;
 }
 
 interface Listener {
   callback: ChangeListener;
-  userId?: string;
+  subscriber: ChangeSubscriber;
+  onRevoke?: () => void;
+}
+
+function reaches(audience: ChangeAudience, subscriber: ChangeSubscriber): boolean {
+  return "teamId" in audience ? audience.teamId === subscriber.teamId : audience.userId === subscriber.userId;
 }
 
 export interface ChangeEventHubOptions {
@@ -68,15 +85,16 @@ export class ChangeEventHub {
     return this.closed;
   }
 
-  publish(event: ChangeEvent): SequencedChangeEvent {
-    return this.publishForAudience(event);
+  /** Announces a change to everyone watching `teamId`. */
+  publish(teamId: string, event: ChangeEvent): SequencedChangeEvent {
+    return this.publishForAudience(event, { teamId });
   }
 
   publishToUser(userId: string, event: ChangeEvent): SequencedChangeEvent {
-    return this.publishForAudience(event, userId);
+    return this.publishForAudience(event, { userId });
   }
 
-  private publishForAudience(event: ChangeEvent, audienceUserId?: string): SequencedChangeEvent {
+  private publishForAudience(event: ChangeEvent, audience: ChangeAudience): SequencedChangeEvent {
     this.sequence += 1;
     // Copy only the known keys so callers cannot leak extra fields into the stream.
     const sequenced: SequencedChangeEvent = {
@@ -88,11 +106,11 @@ export class ChangeEventHub {
       changedAt: event.changedAt,
     };
     if (this.bufferSize > 0) {
-      this.buffer.push({ event: sequenced, audienceUserId });
+      this.buffer.push({ event: sequenced, audience });
       if (this.buffer.length > this.bufferSize) this.buffer.shift();
     }
     for (const listener of [...this.listeners]) {
-      if (audienceUserId !== undefined && listener.userId !== audienceUserId) continue;
+      if (!reaches(audience, listener.subscriber)) continue;
       try {
         listener.callback(sequenced);
       } catch {
@@ -110,13 +128,31 @@ export class ChangeEventHub {
     return sequenced;
   }
 
-  subscribe(listener: ChangeListener, userId?: string): () => void {
+  /**
+   * `onRevoke` runs when the subscriber loses access to the team (see `revoke`); the stream should
+   * end there, because a team's events must not keep flowing to someone no longer in it.
+   */
+  subscribe(listener: ChangeListener, subscriber: ChangeSubscriber, onRevoke?: () => void): () => void {
     if (this.closed) return () => {};
-    const entry = { callback: listener, userId };
+    const entry: Listener = { callback: listener, subscriber, onRevoke };
     this.listeners.add(entry);
     return () => {
       this.listeners.delete(entry);
     };
+  }
+
+  /** Ends the subscriptions of one member of a team, or of everyone in it when `userId` is omitted. */
+  revoke(teamId: string, userId?: string): void {
+    for (const listener of [...this.listeners]) {
+      const { subscriber } = listener;
+      if (subscriber.teamId !== teamId || (userId !== undefined && subscriber.userId !== userId)) continue;
+      this.listeners.delete(listener);
+      try {
+        listener.onRevoke?.();
+      } catch {
+        // Ending one stream must not stop the others from being ended.
+      }
+    }
   }
 
   observe(listener: ChangeListener): () => void {
@@ -128,7 +164,7 @@ export class ChangeEventHub {
   }
 
   /** Returns events published after `lastEventId`, if this process can still provide all of them. */
-  replaySince(lastEventId: string, userId?: string): ReplayResult {
+  replaySince(lastEventId: string, subscriber: ChangeSubscriber): ReplayResult {
     const separator = lastEventId.lastIndexOf(":");
     const epoch = lastEventId.slice(0, separator);
     const seq = Number(lastEventId.slice(separator + 1));
@@ -141,7 +177,7 @@ export class ChangeEventHub {
       complete: true,
       events: this.buffer
         .filter((entry) => sequenceOf(entry.event) > seq)
-        .filter((entry) => entry.audienceUserId === undefined || entry.audienceUserId === userId)
+        .filter((entry) => reaches(entry.audience, subscriber))
         .map((entry) => entry.event),
     };
   }

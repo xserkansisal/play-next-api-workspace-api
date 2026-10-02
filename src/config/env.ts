@@ -82,7 +82,23 @@ const baseEnvSchema = z.object({
   PROXY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000),
   PROXY_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),
   PRESENCE_SIMULATOR_ENABLED: booleanEnv(false),
+  // Comma-separated addresses promoted to system admin when they sign in. This only bootstraps the
+  // first admins; after that, admins are managed through the admin API.
+  ADMIN_EMAILS: optionalStringEnv(
+    z.string().refine(
+      (value) => parseEmailList(value).every((email) => z.email().safeParse(email).success),
+      "must be a comma-separated list of email addresses",
+    ),
+  ),
 });
+
+export function parseEmailList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.length > 0);
+}
 
 const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV === "production" && env.PRESENCE_SIMULATOR_ENABLED) {

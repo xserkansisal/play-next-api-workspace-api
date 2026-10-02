@@ -5,7 +5,7 @@ import type { AppDatabase } from "../db/client.js";
 import { collections, items } from "../db/schema.js";
 import { NotFoundError } from "../errors.js";
 import type { PresenceHub } from "../events/presence.js";
-import { authenticatedUserId } from "../middleware/authenticate.js";
+import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
 import { idSchema } from "../validation/schemas.js";
 
 const locationSchema = z.discriminatedUnion("kind", [
@@ -26,12 +26,17 @@ export function createPresenceRouter(db: AppDatabase, presence: PresenceHub): Ro
     try {
       const input = presenceInputSchema.parse(req.body);
       const userId = authenticatedUserId(req);
+      const teamId = requestTeamId(req);
 
       if (input.location) {
         const activeCollection = await db
           .select({ id: collections.id })
           .from(collections)
-          .where(and(eq(collections.id, input.location.collectionId), isNull(collections.deletedAt)))
+          .where(and(
+            eq(collections.id, input.location.collectionId),
+            eq(collections.teamId, teamId),
+            isNull(collections.deletedAt),
+          ))
           .limit(1);
         if (activeCollection.length === 0) throw new NotFoundError("Presence resource not found");
 
@@ -55,7 +60,7 @@ export function createPresenceRouter(db: AppDatabase, presence: PresenceHub): Ro
       const user = req.authUser;
       if (!user) throw new Error("Authenticated user disappeared before presence was updated");
       presence.heartbeat(
-        { userId, firstName: user.firstName, lastName: user.lastName },
+        { userId, firstName: user.firstName, lastName: user.lastName, teamId },
         input.clientId,
         input.location,
       );
