@@ -24,11 +24,12 @@ describe("loadEnv", () => {
       AUTH_CODE_VERIFY_LIMIT: 10,
       AUTH_CODE_VERIFY_WINDOW_SECONDS: 900,
       AUTH_SESSION_TTL_SECONDS: 2592000,
-      AUTH_COOKIE_NAME: "play_next_session",
+      AUTH_COOKIE_NAME: "play_next_session_dev",
       AUTH_COOKIE_SECURE: false,
       SMTP_PORT: 587,
       SMTP_SECURE: false,
       PRESENCE_SIMULATOR_ENABLED: false,
+      AUTH_DEV_BYPASS: false,
     });
   });
 
@@ -67,6 +68,34 @@ describe("loadEnv", () => {
     expect(() => loadEnv({
       NODE_ENV: "production",
       PRESENCE_SIMULATOR_ENABLED: "true",
+      AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
+      MYSQL_PASSWORD: "test-password",
+      SMTP_HOST: "smtp.test.local",
+      SMTP_FROM: "sender@sisal.com",
+    })).toThrow(EnvValidationError);
+  });
+
+  it("names the session cookie by environment unless overridden", () => {
+    expect(loadEnv({ NODE_ENV: "development" }).AUTH_COOKIE_NAME).toBe("play_next_session_dev");
+    expect(loadEnv({ NODE_ENV: "test" }).AUTH_COOKIE_NAME).toBe("play_next_session_test");
+    expect(loadEnv({
+      NODE_ENV: "production",
+      AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
+      MYSQL_PASSWORD: "test-password",
+      SMTP_HOST: "smtp.test.local",
+      SMTP_FROM: "sender@sisal.com",
+    }).AUTH_COOKIE_NAME).toBe("play_next_session");
+    expect(loadEnv({ NODE_ENV: "development", AUTH_COOKIE_NAME: "custom" }).AUTH_COOKIE_NAME).toBe("custom");
+    expect(loadEnv({ AUTH_COOKIE_NAME: "" }).AUTH_COOKIE_NAME).toBe("play_next_session_dev");
+  });
+
+  it("allows the dev sign-in bypass only in development", () => {
+    expect(loadEnv({}).AUTH_DEV_BYPASS).toBe(false);
+    expect(loadEnv({ NODE_ENV: "development", AUTH_DEV_BYPASS: "true" }).AUTH_DEV_BYPASS).toBe(true);
+    expect(() => loadEnv({ NODE_ENV: "test", AUTH_DEV_BYPASS: "true" })).toThrow(EnvValidationError);
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      AUTH_DEV_BYPASS: "true",
       AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
       MYSQL_PASSWORD: "test-password",
       SMTP_HOST: "smtp.test.local",

@@ -78,6 +78,7 @@ describe("PM2 ecosystem configuration", () => {
       PROXY_TIMEOUT_MS: "30000",
       PROXY_MAX_RESPONSE_BYTES: "10485760",
       PRESENCE_SIMULATOR_ENABLED: "false",
+      AUTH_DEV_BYPASS: "false",
     };
 
     const { env } = loadConfig(exported);

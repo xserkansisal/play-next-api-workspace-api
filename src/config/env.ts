@@ -28,6 +28,14 @@ const MIN_PEPPER_DISTINCT_CHARACTERS = 5;
 
 const distinctCharacters = (value: string) => new Set(value).size;
 
+// Production keeps the original name so existing sessions survive; the other environments get a
+// suffix so APIs sharing a host (localhost on different ports) do not overwrite each other's cookie.
+const DEFAULT_COOKIE_NAMES = {
+  production: "play_next_session",
+  development: "play_next_session_dev",
+  test: "play_next_session_test",
+} as const;
+
 const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
@@ -56,7 +64,7 @@ const baseEnvSchema = z.object({
   AUTH_CODE_VERIFY_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
   AUTH_CODE_VERIFY_WINDOW_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
   AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().min(3600).max(7_776_000).default(2_592_000),
-  AUTH_COOKIE_NAME: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).default("play_next_session"),
+  AUTH_COOKIE_NAME: optionalStringEnv(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)),
   AUTH_COOKIE_SECURE: booleanEnv(false),
   SMTP_HOST: optionalStringEnv(z.string().min(1)),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -65,6 +73,7 @@ const baseEnvSchema = z.object({
   SMTP_PASSWORD: optionalStringEnv(z.string().min(1)),
   SMTP_FROM: optionalStringEnv(z.email()),
   AUTH_DEV_INBOX_TOKEN: optionalStringEnv(z.string().min(32)),
+  AUTH_DEV_BYPASS: booleanEnv(false),
   // Server-side request execution is off until an operator names the hosts it may reach. Empty is
   // the safe default: an open proxy inside a private network is worth more to an attacker than one
   // on the public internet, because this process can reach hosts they cannot. "*" admits every
@@ -81,6 +90,13 @@ const envSchema = baseEnvSchema.superRefine((env, ctx) => {
       code: "custom",
       path: ["PRESENCE_SIMULATOR_ENABLED"],
       message: "is only allowed in development and test environments",
+    });
+  }
+  if (env.NODE_ENV !== "development" && env.AUTH_DEV_BYPASS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["AUTH_DEV_BYPASS"],
+      message: "is only allowed when NODE_ENV is development",
     });
   }
   if (env.NODE_ENV === "production") {
@@ -114,7 +130,7 @@ const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
     ctx.addIssue({ code: "custom", path: ["SMTP_USER"], message: "SMTP_USER and SMTP_PASSWORD must be configured together" });
   }
-});
+}).transform((env) => ({ ...env, AUTH_COOKIE_NAME: env.AUTH_COOKIE_NAME ?? DEFAULT_COOKIE_NAMES[env.NODE_ENV] }));
 
 export type Env = z.infer<typeof envSchema>;
 

@@ -47,7 +47,8 @@ module.exports = {
         AUTH_CODE_VERIFY_LIMIT: process.env.AUTH_CODE_VERIFY_LIMIT || "10",
         AUTH_CODE_VERIFY_WINDOW_SECONDS: process.env.AUTH_CODE_VERIFY_WINDOW_SECONDS || "900",
         AUTH_SESSION_TTL_SECONDS: process.env.AUTH_SESSION_TTL_SECONDS || "2592000",
-        AUTH_COOKIE_NAME: process.env.AUTH_COOKIE_NAME || "play_next_session",
+        // Left to the API default (play_next_session in production) unless overridden.
+        ...(process.env.AUTH_COOKIE_NAME ? { AUTH_COOKIE_NAME: process.env.AUTH_COOKIE_NAME } : {}),
         AUTH_COOKIE_SECURE: process.env.AUTH_COOKIE_SECURE || "false",
         ...(process.env.SMTP_HOST ? { SMTP_HOST: process.env.SMTP_HOST } : {}),
         SMTP_PORT: process.env.SMTP_PORT || "587",
@@ -65,6 +66,8 @@ module.exports = {
         PROXY_TIMEOUT_MS: process.env.PROXY_TIMEOUT_MS || "30000",
         PROXY_MAX_RESPONSE_BYTES: process.env.PROXY_MAX_RESPONSE_BYTES || "10485760",
         PRESENCE_SIMULATOR_ENABLED: "false",
+        // Development-only sign-in shortcut; production refuses to start with it on.
+        AUTH_DEV_BYPASS: "false",
       },
     },
   ],

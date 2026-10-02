@@ -497,6 +497,29 @@ describe("email code sign-in", () => {
     expect(inbox.body.code).toBe(message.code);
   });
 
+  it("does not register the code-free dev login unless the bypass is on", async () => {
+    const context = await setup({ env: { NODE_ENV: "development" } });
+    await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev@sisal.com" }).expect(404);
+  });
+
+  it("signs in with an email alone when the development bypass is on", async () => {
+    const context = await setup({ env: { NODE_ENV: "development", AUTH_DEV_BYPASS: true } });
+    const response = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "Dev.Person@sisal.com" }).expect(200);
+    expect(response.body.user.email).toBe("dev.person@sisal.com");
+    const cookie = cookiePair(setCookieHeader(response));
+    expect(cookie.startsWith("play_next_session_dev=")).toBe(true);
+    const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
+    expect(me.body.user.email).toBe("dev.person@sisal.com");
+    const again = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev.person@sisal.com" }).expect(200);
+    expect(again.body.user.id).toBe(response.body.user.id);
+  });
+
+  it("keeps the domain allow-list on the development bypass", async () => {
+    const context = await setup({ env: { NODE_ENV: "development", AUTH_DEV_BYPASS: true } });
+    const response = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev@example.com" }).expect(400);
+    expect(response.body.error.code).toBe("EMAIL_DOMAIN_NOT_ALLOWED");
+  });
+
   // A misconfigured SMTP host is otherwise a 503 with the reason discarded, which leaves an
   // operator setting up mail with nothing to go on. The caller is still told only that delivery
   // failed, because naming the reason would confirm the address is eligible.

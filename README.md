@@ -54,10 +54,11 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `AUTH_CODE_REQUEST_LIMIT` / `AUTH_CODE_REQUEST_WINDOW_SECONDS` | `3` / `900` | Code requests allowed per normalized email per window |
 | `AUTH_CODE_VERIFY_LIMIT` / `AUTH_CODE_VERIFY_WINDOW_SECONDS` | `10` / `900` | Verification requests allowed per normalized email per window |
 | `AUTH_SESSION_TTL_SECONDS` | `2592000` | Server-side session lifetime (one month by default) |
-| `AUTH_COOKIE_NAME` | `play_next_session` | Session cookie name |
+| `AUTH_COOKIE_NAME` | by `NODE_ENV`: `play_next_session` (production), `play_next_session_dev`, `play_next_session_test` | Session cookie name; set it to override the per-environment default |
 | `AUTH_COOKIE_SECURE` | `false` | Adds the cookie's `Secure` attribute when enabled; keep false only for the current HTTP-only internal deployment |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | host/from required in production; port `587`, secure `false` | Organization SMTP transport; setting host and sender switches on real delivery in any mode; username and password must be set together; see "Configuring email delivery" |
 | `AUTH_DEV_INBOX_TOKEN` | unset | Optional 32+ character token enabling the `/api/v1/auth/dev-inbox` development helper for a directly connected local caller; refused for anything relayed through a proxy; never set in production |
+| `AUTH_DEV_BYPASS` | `false` | Development only: registers `POST /api/v1/auth/dev-login`, which signs in an allowed email without a code. Startup fails if enabled when `NODE_ENV` is not `development`; see `docs/frontend-dev-login.md` |
 
 JSON request bodies are limited to 50 MiB (50 × 1024 × 1024 bytes) to support larger
 collection imports. Each individual request body's `content` is still limited to 1,000,000

@@ -25,6 +25,12 @@ async function main(): Promise<void> {
         "This is an open proxy for every signed-in user. Use it only on a trusted machine.",
     );
   }
+  if (env.AUTH_DEV_BYPASS) {
+    console.warn(
+      "WARNING: AUTH_DEV_BYPASS is on, so POST /api/v1/auth/dev-login signs in any allowed email " +
+        "without a code. Use it only on a trusted development machine.",
+    );
+  }
   if (allowsAnyOrigin(env.CORS_ORIGIN)) {
     console.warn(
       'WARNING: CORS_ORIGIN is "*", so any website may call this API with the signed-in user\'s ' +

@@ -99,7 +99,7 @@ export AUTH_CODE_REQUEST_WINDOW_SECONDS=900
 export AUTH_CODE_VERIFY_LIMIT=10
 export AUTH_CODE_VERIFY_WINDOW_SECONDS=900
 export AUTH_SESSION_TTL_SECONDS=2592000
-export AUTH_COOKIE_NAME=play_next_session
+# Optional: AUTH_COOKIE_NAME defaults to play_next_session in production.
 export AUTH_COOKIE_SECURE=false
 export SMTP_HOST=smtp.internal.example
 export SMTP_PORT=587
@@ -191,6 +191,11 @@ plain-HTTP deployment; setting it true before HTTPS would prevent browsers from 
 cookie. Because this deployment has no TLS, sign-in codes and session cookies are visible to
 network observers on the internal network. Do not extend access beyond that network without
 revisiting TLS.
+
+For local development without any code step, set `AUTH_DEV_BYPASS=true` (only valid with
+`NODE_ENV=development`; the API refuses to start otherwise, and PM2 pins it to `false`). It adds
+`POST /api/v1/auth/dev-login`, which signs in any allowed-domain email. Never export it on a shared
+or reachable host: it removes the proof of mailbox ownership entirely.
 
 In development/tests the default sender holds the latest code in memory and never sends/logs it.
 For local manual development, optionally set `AUTH_DEV_INBOX_TOKEN` to a random value of at

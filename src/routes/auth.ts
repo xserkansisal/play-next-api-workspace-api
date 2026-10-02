@@ -4,6 +4,7 @@ import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { MemoryEmailCodeSender, type EmailCodeSender } from "../auth/email.js";
 import {
+  createSessionForEmail,
   invalidateCode,
   requestCode,
   revokeSession,
@@ -37,6 +38,7 @@ type AuthEnv = Pick<
   | "AUTH_COOKIE_NAME"
   | "AUTH_COOKIE_SECURE"
   | "AUTH_DEV_INBOX_TOKEN"
+  | "AUTH_DEV_BYPASS"
   | "CORS_ORIGIN"
 >;
 
@@ -167,6 +169,24 @@ export function createAuthRouter(
       next(err);
     }
   });
+
+  // Development only: signs in with just an email, skipping the code. Gated by NODE_ENV and an
+  // explicit flag; env validation also refuses the flag outside development.
+  if (env.NODE_ENV === "development" && env.AUTH_DEV_BYPASS) {
+    router.post("/dev-login", async (req, res, next) => {
+      try {
+        const { email } = emailInputSchema.parse(req.body);
+        const session = await createSessionForEmail(db, authConfig, email);
+        res.setHeader(
+          "Set-Cookie",
+          appendCookie(env.AUTH_COOKIE_NAME, session.sessionToken, cookieOptions(env, env.AUTH_SESSION_TTL_SECONDS)),
+        );
+        res.status(200).json({ user: publicUser(req, env, session.user), expiresAt: session.expiresAt });
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
 
   router.get("/me", requireAuth, (req, res) => {
     res.json({ user: publicUser(req, env, req.authUser!) });

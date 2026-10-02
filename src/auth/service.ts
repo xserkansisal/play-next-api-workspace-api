@@ -154,6 +154,56 @@ export type VerifyOutcome =
   | { ok: true; session: VerifiedSession }
   | { ok: false; rateLimited: boolean };
 
+async function openSession(
+  tx: DbExecutor,
+  email: string,
+  sessionToken: string,
+  sessionExpiresAt: string,
+  now: string,
+): Promise<VerifiedSession> {
+  const profileName = deriveUserProfileName(email);
+  await tx
+    .insert(users)
+    .values({ id: randomUUID(), email, ...profileName, createdAt: now })
+    .onDuplicateKeyUpdate({ set: { email } });
+  const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
+  if (!user) throw new Error("User row disappeared while a verified session was being created");
+  const avatar = await first(tx.select({ id: userAvatars.id }).from(userAvatars).where(eq(userAvatars.userId, user.id)).limit(1));
+  const firstName = user.firstName || profileName.firstName;
+  const lastName = user.lastName || profileName.lastName;
+  if (firstName !== user.firstName || lastName !== user.lastName) {
+    await tx.update(users).set({ firstName, lastName }).where(eq(users.id, user.id));
+  }
+
+  await tx.insert(authSessions).values({
+    id: randomUUID(),
+    userId: user.id,
+    tokenHash: hashSessionToken(sessionToken),
+    createdAt: now,
+    expiresAt: sessionExpiresAt,
+  });
+  return {
+    user: { id: user.id, email: user.email, firstName, lastName, avatarColor: user.avatarColor, avatarId: avatar?.id ?? null },
+    sessionToken,
+    expiresAt: sessionExpiresAt,
+  };
+}
+
+/**
+ * Opens a session without a sign-in code. Only the development-only route may call this; the
+ * domain allow-list still applies.
+ */
+export async function createSessionForEmail(
+  db: AppDatabase,
+  config: Pick<AuthServiceConfig, "AUTH_SESSION_TTL_SECONDS">,
+  inputEmail: string,
+): Promise<VerifiedSession> {
+  const email = validateAllowedEmail(inputEmail);
+  const nowDate = new Date();
+  const sessionExpiresAt = isoAfter(config.AUTH_SESSION_TTL_SECONDS, nowDate.getTime());
+  return db.transaction((tx) => openSession(tx, email, generateSessionToken(), sessionExpiresAt, nowDate.toISOString()));
+}
+
 export async function verifyCode(
   db: AppDatabase,
   config: AuthServiceConfig,
@@ -210,35 +260,7 @@ export async function verifyCode(
 
     await tx.update(authCodes).set({ attempts: nextAttempts, consumedAt: now }).where(eq(authCodes.id, challenge.id));
 
-    const profileName = deriveUserProfileName(email);
-    await tx
-      .insert(users)
-      .values({ id: randomUUID(), email, ...profileName, createdAt: now })
-      .onDuplicateKeyUpdate({ set: { email } });
-    const user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
-    if (!user) throw new Error("User row disappeared while a verified session was being created");
-    const avatar = await first(tx.select({ id: userAvatars.id }).from(userAvatars).where(eq(userAvatars.userId, user.id)).limit(1));
-    const firstName = user.firstName || profileName.firstName;
-    const lastName = user.lastName || profileName.lastName;
-    if (firstName !== user.firstName || lastName !== user.lastName) {
-      await tx.update(users).set({ firstName, lastName }).where(eq(users.id, user.id));
-    }
-
-    await tx.insert(authSessions).values({
-      id: randomUUID(),
-      userId: user.id,
-      tokenHash: hashSessionToken(generatedSessionToken),
-      createdAt: now,
-      expiresAt: sessionExpiresAt,
-    });
-    return {
-      ok: true,
-      session: {
-        user: { id: user.id, email: user.email, firstName, lastName, avatarColor: user.avatarColor, avatarId: avatar?.id ?? null },
-        sessionToken: generatedSessionToken,
-        expiresAt: sessionExpiresAt,
-      },
-    };
+    return { ok: true, session: await openSession(tx, email, generatedSessionToken, sessionExpiresAt, now) };
   });
 }
 
