@@ -188,7 +188,7 @@ to anyone else, and the role is checked on every request, so a demotion takes ef
 | DELETE | `/api/v1/admin/teams/:teamId` | Permanently delete an archived team (`409 TEAM_NOT_ARCHIVED` otherwise; `409 TEAM_NOT_EMPTY` while any collection, environment or global variable, trashed ones included, still belongs to it) |
 | GET/POST | `/api/v1/admin/teams/:teamId/members` | List / add a member by email. Body: `{ "email", "role"? }` (default `member`) |
 | PATCH/DELETE | `/api/v1/admin/teams/:teamId/members/:userId` | Change a member's `role` / remove the member |
-| GET | `/api/v1/admin/users` | Search users (`?query=&limit=&offset=`); returns `{ users, total }` |
+| GET | `/api/v1/admin/users` | Search users (`?query=&limit=&offset=`); returns `{ users, total }`, each user with `avatarUrl` |
 | GET/PATCH | `/api/v1/admin/users/:userId` | Read a user with their teams / set `systemRole` |
 | GET | `/api/v1/admin/audit-log` | Administrative changes, newest first (`?teamId=&limit=&offset=`) |
 

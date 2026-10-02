@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { first } from "../db/query.js";
-import { adminAuditLog, collections, environments, teamMembers, teams, users, variables } from "../db/schema.js";
+import { adminAuditLog, collections, environments, teamMembers, teams, userAvatars, users, variables } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import { validateAllowedEmail, type SystemRole } from "../auth/service.js";
 import { deriveUserProfileName } from "../auth/profile.js";
@@ -44,6 +44,8 @@ export interface AdminUser {
   createdAt: string;
   /** False for an account an admin created that has never signed in. */
   hasSignedIn: boolean;
+  /** Id of the stored avatar image, or null. Routes expose it to clients as `avatarUrl`. */
+  avatarId: string | null;
 }
 
 export interface UserTeamMembership {
@@ -413,6 +415,7 @@ const adminUserColumns = {
   createdAt: users.createdAt,
   // Qualified by hand: drizzle renders a bare `id` here, which the subquery would bind to s.id.
   hasSignedIn: sql<number>`EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = \`users\`.\`id\`)`,
+  avatarId: userAvatars.id,
 };
 
 function toAdminUser(row: Omit<AdminUser, "hasSignedIn"> & { hasSignedIn: number | boolean }): AdminUser {
@@ -437,7 +440,14 @@ export async function listUsers(
     );
   }
   const [rows, [total]] = await Promise.all([
-    db.select(adminUserColumns).from(users).where(where).orderBy(asc(users.email)).limit(options.limit).offset(options.offset),
+    db
+      .select(adminUserColumns)
+      .from(users)
+      .leftJoin(userAvatars, eq(userAvatars.userId, users.id))
+      .where(where)
+      .orderBy(asc(users.email))
+      .limit(options.limit)
+      .offset(options.offset),
     db.select({ value: count() }).from(users).where(where),
   ]);
   return { users: rows.map(toAdminUser), total: Number(total?.value ?? 0) };
@@ -453,7 +463,14 @@ async function userTeams(db: DbExecutor, userId: string): Promise<UserTeamMember
 }
 
 export async function readUser(db: DbExecutor, id: string): Promise<AdminUserDetail> {
-  const row = await first(db.select(adminUserColumns).from(users).where(eq(users.id, id)).limit(1));
+  const row = await first(
+    db
+      .select(adminUserColumns)
+      .from(users)
+      .leftJoin(userAvatars, eq(userAvatars.userId, users.id))
+      .where(eq(users.id, id))
+      .limit(1),
+  );
   if (!row) throw new NotFoundError(`User ${id} not found`, "USER_NOT_FOUND");
   return { ...toAdminUser(row), teams: await userTeams(db, id) };
 }

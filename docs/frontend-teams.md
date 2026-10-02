@@ -176,6 +176,7 @@ interface AdminUser {
   id: string; email: string; firstName: string; lastName: string; avatarColor: string;
   systemRole: "user" | "admin"; createdAt: string;
   hasSignedIn: boolean; // false for accounts created by adding a member who never signed in
+  avatarUrl: string | null; // same convention as /auth/me; null when no photo was uploaded
 }
 interface AdminUserDetail extends AdminUser {
   teams: { id: string; name: string; role: TeamRole; archivedAt: string | null }[];

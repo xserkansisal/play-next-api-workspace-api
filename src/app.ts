@@ -96,7 +96,7 @@ export function createApp({
   app.use("/api/v1/trash", requireAuth, requireTeam, createTrashRouter(db, events));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
   app.use("/api/v1/teams", requireAuth, createTeamsRouter(db));
-  app.use("/api/v1/admin", requireAuth, requireSystemAdmin, createAdminRouter(db, { events, presence }));
+  app.use("/api/v1/admin", requireAuth, requireSystemAdmin, createAdminRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
 
   app.use(notFoundHandler);
   app.use(createErrorHandler({ exposeInternalErrors: env.NODE_ENV !== "production", logger }));
