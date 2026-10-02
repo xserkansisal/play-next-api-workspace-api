@@ -19,8 +19,8 @@ import {
 } from "../auth/service.js";
 import { constantTimeStringEqual } from "../auth/crypto.js";
 import { AVATAR_CONTENT_TYPE, AVATAR_MAX_BYTES, processAvatarImage } from "../auth/avatarImage.js";
+import { withAvatarUrl } from "../auth/avatarUrl.js";
 import { HttpError } from "../errors.js";
-import { allowsAnyOrigin } from "../middleware/cors.js";
 import { authenticatedUserId, createAuthenticationMiddleware, readCookie } from "../middleware/authenticate.js";
 import { emailInputSchema, updateProfileInputSchema, verifyCodeInputSchema } from "../validation/authSchemas.js";
 
@@ -43,25 +43,8 @@ type AuthEnv = Pick<
   | "ADMIN_EMAILS"
 >;
 
-const AVATAR_PATH = "/api/v1/auth/avatars";
-
-/**
- * Same-origin clients (the nginx deployment) get a root-relative URL. A browser on another
- * allowed origin - the Vite dev server - would resolve that against its own origin, so it gets
- * this API's absolute URL instead.
- */
-function avatarUrl(req: Request, env: AuthEnv, avatarId: string | null): string | null {
-  if (!avatarId) return null;
-  const path = `${AVATAR_PATH}/${avatarId}`;
-  const origin = req.get("Origin");
-  const crossOrigin =
-    !!origin && !!env.CORS_ORIGIN && (allowsAnyOrigin(env.CORS_ORIGIN) || origin === env.CORS_ORIGIN);
-  return crossOrigin ? `${req.protocol}://${req.get("host")}${path}` : path;
-}
-
 function publicUser(req: Request, env: AuthEnv, user: AuthUser) {
-  const { avatarId, ...profile } = user;
-  return { ...profile, avatarUrl: avatarUrl(req, env, avatarId) };
+  return withAvatarUrl(req, env.CORS_ORIGIN, user);
 }
 
 const avatarUpload = multer({

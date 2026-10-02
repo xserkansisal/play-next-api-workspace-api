@@ -1,4 +1,5 @@
 import request from "supertest";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestContext, type TestContext } from "../helpers.js";
 
@@ -50,6 +51,57 @@ describe("system admin access", () => {
 
     await other.patch(`/api/v1/admin/users/${me.id}`).send({ systemRole: "user" }).expect(200);
     await ctx.api.get("/api/v1/admin/teams").expect(403);
+  });
+});
+
+describe("user avatars", () => {
+  async function uploadAvatar(agent: ReturnType<typeof request.agent>) {
+    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#3366cc" } }).png().toBuffer();
+    return (await agent.post("/api/v1/auth/me/avatar").attach("avatar", png, "a.png").expect(200)).body.user.avatarUrl as string;
+  }
+
+  it("exposes avatarUrl on user list, detail and role update responses", async () => {
+    const person = await signInAs(ctx, "photo.person@sisal.com");
+    const personId = (await person.get("/api/v1/auth/me").expect(200)).body.user.id;
+
+    const before = (await ctx.api.get("/api/v1/admin/users?query=photo.person").expect(200)).body.users[0];
+    expect(before.avatarUrl).toBeNull();
+    expect(before).not.toHaveProperty("avatarId");
+
+    const url = await uploadAvatar(person);
+    expect(url).toMatch(/^\/api\/v1\/auth\/avatars\/[0-9a-f-]{36}$/);
+
+    const listed = (await ctx.api.get("/api/v1/admin/users?query=photo.person").expect(200)).body;
+    expect(listed.total).toBe(1);
+    expect(listed.users[0]).toMatchObject({ id: personId, avatarUrl: url });
+    expect(listed.users[0]).not.toHaveProperty("avatarId");
+    const detail = (await ctx.api.get(`/api/v1/admin/users/${personId}`).expect(200)).body;
+    expect(detail).toMatchObject({ id: personId, avatarUrl: url, teams: [] });
+    expect(detail).not.toHaveProperty("avatarId");
+    const promoted = (await ctx.api.patch(`/api/v1/admin/users/${personId}`).send({ systemRole: "admin" }).expect(200)).body;
+    expect(promoted).toMatchObject({ systemRole: "admin", avatarUrl: url });
+
+    // The admin can load the returned URL with their own session.
+    await ctx.api.get(url).expect(200).expect("Content-Type", "image/webp");
+  });
+
+  it("returns absolute avatar URLs to the allowed cross-origin client", async () => {
+    const crossOrigin = await createTestContext(":memory:", {
+      env: { ADMIN_EMAILS: "Test@sisal.com", CORS_ORIGIN: "http://localhost:5173" },
+    });
+    try {
+      const person = await signInAs(crossOrigin, "photo.person@sisal.com");
+      const personId = (await person.get("/api/v1/auth/me").expect(200)).body.user.id;
+      const path = await uploadAvatar(person);
+
+      const listed = (await crossOrigin.api.get("/api/v1/admin/users?query=photo.person").set("Origin", "http://localhost:5173").expect(200))
+        .body.users[0];
+      expect(listed.avatarUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+${path}$`));
+      const detail = (await crossOrigin.api.get(`/api/v1/admin/users/${personId}`).set("Origin", "http://localhost:5173").expect(200)).body;
+      expect(detail.avatarUrl).toBe(listed.avatarUrl);
+    } finally {
+      await crossOrigin.close();
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { withAvatarUrl } from "../auth/avatarUrl.js";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEventHub } from "../events/hub.js";
 import type { PresenceHub } from "../events/presence.js";
@@ -33,6 +34,8 @@ import {
 export interface AdminRouterOptions {
   events?: ChangeEventHub;
   presence?: PresenceHub;
+  /** Same value as the CORS middleware, so avatar URLs follow the auth routes' convention. */
+  corsOrigin?: string;
 }
 
 /** System administration. Mount behind authentication and `requireSystemAdmin`. */
@@ -99,16 +102,18 @@ export function createAdminRouter(db: AppDatabase, options: AdminRouterOptions =
   });
 
   router.get("/users", async (req, res) => {
-    res.json(await listUsers(db, listUsersQuerySchema.parse(req.query)));
+    const { users, total } = await listUsers(db, listUsersQuerySchema.parse(req.query));
+    res.json({ users: users.map((user) => withAvatarUrl(req, options.corsOrigin, user)), total });
   });
 
   router.get("/users/:userId", async (req, res) => {
-    res.json(await readUser(db, req.params.userId));
+    res.json(withAvatarUrl(req, options.corsOrigin, await readUser(db, req.params.userId)));
   });
 
   router.patch("/users/:userId", async (req, res) => {
     const { systemRole } = updateUserSchema.parse(req.body);
-    res.json(await updateUserSystemRole(db, req.params.userId, systemRole, authenticatedUserId(req)));
+    const user = await updateUserSystemRole(db, req.params.userId, systemRole, authenticatedUserId(req));
+    res.json(withAvatarUrl(req, options.corsOrigin, user));
   });
 
   router.get("/audit-log", async (req, res) => {
