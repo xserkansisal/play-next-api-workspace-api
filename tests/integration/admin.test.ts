@@ -15,7 +15,7 @@ async function signInAs(context: TestContext, email: string) {
 }
 
 beforeEach(async () => {
-  ctx = await createTestContext(":memory:", { env: { ADMIN_EMAILS: "Test@sisal.com, second-admin@sisal.com" } });
+  ctx = await createTestContext(":memory:", { env: { ADMIN_EMAILS: "Test@fluttersea.com, second-admin@fluttersea.com" } });
 });
 
 afterEach(async () => ctx.close());
@@ -23,13 +23,13 @@ afterEach(async () => ctx.close());
 describe("system admin access", () => {
   it("promotes ADMIN_EMAILS on sign-in and exposes the role on /me", async () => {
     expect((await ctx.api.get("/api/v1/auth/me").expect(200)).body.user.systemRole).toBe("admin");
-    const regular = await signInAs(ctx, "regular@sisal.com");
+    const regular = await signInAs(ctx, "regular@fluttersea.com");
     expect((await regular.get("/api/v1/auth/me").expect(200)).body.user.systemRole).toBe("user");
   });
 
   it("rejects anonymous and non-admin callers", async () => {
     await ctx.unauthenticatedApi.get("/api/v1/admin/teams").expect(401);
-    const regular = await signInAs(ctx, "regular@sisal.com");
+    const regular = await signInAs(ctx, "regular@fluttersea.com");
     const response = await regular.get("/api/v1/admin/teams").expect(403);
     expect(response.body.error.code).toBe("ADMIN_REQUIRED");
     await regular.post("/api/v1/admin/teams").send({ name: "Sneaky" }).expect(403);
@@ -43,7 +43,7 @@ describe("system admin access", () => {
     const lastAdmin = await ctx.api.patch(`/api/v1/admin/users/${me.id}`).send({ systemRole: "user" }).expect(409);
     expect(lastAdmin.body.error.code).toBe("LAST_SYSTEM_ADMIN");
 
-    const other = await signInAs(ctx, "other@sisal.com");
+    const other = await signInAs(ctx, "other@fluttersea.com");
     const otherUser = (await other.get("/api/v1/auth/me").expect(200)).body.user;
     const promoted = await ctx.api.patch(`/api/v1/admin/users/${otherUser.id}`).send({ systemRole: "admin" }).expect(200);
     expect(promoted.body.systemRole).toBe("admin");
@@ -54,6 +54,46 @@ describe("system admin access", () => {
   });
 });
 
+describe("deleting users", () => {
+  it("removes the account and its own data, keeps shared content, and guards last admin/owner/self", async () => {
+    const me = (await ctx.api.get("/api/v1/auth/me").expect(200)).body.user;
+    const victim = await signInAs(ctx, "victim@fluttersea.com");
+    const victimUser = (await victim.get("/api/v1/auth/me").expect(200)).body.user;
+    const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Delete Test" }).expect(201)).body;
+    await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "victim@fluttersea.com", role: "owner" }).expect(201);
+
+    const own = await ctx.api.delete(`/api/v1/admin/users/${me.id}`).expect(409);
+    expect(own.body.error.code).toBe("CANNOT_DELETE_SELF");
+
+    // The team's creator is not a member, so the victim is its only owner.
+    const lastOwner = await ctx.api.delete(`/api/v1/admin/users/${victimUser.id}`).expect(409);
+    expect(lastOwner.body.error.code).toBe("TEAM_LAST_OWNER");
+
+    await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "second@fluttersea.com", role: "owner" }).expect(201);
+    await ctx.api.delete(`/api/v1/admin/users/${victimUser.id}`).expect(204);
+
+    await victim.get("/api/v1/auth/me").expect(401);
+    await ctx.api.get(`/api/v1/admin/users/${victimUser.id}`).expect(404);
+    await ctx.api.delete(`/api/v1/admin/users/${victimUser.id}`).expect(404);
+    const members = (await ctx.api.get(`/api/v1/admin/teams/${team.id}`).expect(200)).body.members;
+    expect(members.map((m: { email: string }) => m.email)).toEqual(["second@fluttersea.com"]);
+    const audit = (await ctx.api.get("/api/v1/admin/audit-log").expect(200)).body;
+    expect(JSON.stringify(audit)).toContain("user.deleted");
+  });
+
+  it("refuses to delete the last system admin", async () => {
+    const me = (await ctx.api.get("/api/v1/auth/me").expect(200)).body.user;
+    const seeded = (await ctx.api.get("/api/v1/admin/users?query=serkan.taghan").expect(200)).body.users[0];
+    await ctx.api.patch(`/api/v1/admin/users/${seeded.id}`).send({ systemRole: "user" }).expect(200);
+    const other = await signInAs(ctx, "other@fluttersea.com");
+    const otherUser = (await other.get("/api/v1/auth/me").expect(200)).body.user;
+    await ctx.api.patch(`/api/v1/admin/users/${otherUser.id}`).send({ systemRole: "admin" }).expect(200);
+    await other.patch(`/api/v1/admin/users/${me.id}`).send({ systemRole: "user" }).expect(200);
+    expect((await other.delete(`/api/v1/admin/users/${otherUser.id}`).expect(409)).body.error.code).toBe("CANNOT_DELETE_SELF");
+    await other.delete(`/api/v1/admin/users/${me.id}`).expect(204);
+  });
+});
+
 describe("user avatars", () => {
   async function uploadAvatar(agent: ReturnType<typeof request.agent>) {
     const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#3366cc" } }).png().toBuffer();
@@ -61,7 +101,7 @@ describe("user avatars", () => {
   }
 
   it("exposes avatarUrl on user list, detail and role update responses", async () => {
-    const person = await signInAs(ctx, "photo.person@sisal.com");
+    const person = await signInAs(ctx, "photo.person@fluttersea.com");
     const personId = (await person.get("/api/v1/auth/me").expect(200)).body.user.id;
 
     const before = (await ctx.api.get("/api/v1/admin/users?query=photo.person").expect(200)).body.users[0];
@@ -86,14 +126,14 @@ describe("user avatars", () => {
   });
 
   it("exposes avatarUrl on team members", async () => {
-    const person = await signInAs(ctx, "photo.person@sisal.com");
+    const person = await signInAs(ctx, "photo.person@fluttersea.com");
     const url = await uploadAvatar(person);
     const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Photos" }).expect(201)).body;
 
-    const added = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "photo.person@sisal.com" }).expect(201)).body;
-    expect(added).toMatchObject({ email: "photo.person@sisal.com", avatarUrl: url });
+    const added = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "photo.person@fluttersea.com" }).expect(201)).body;
+    expect(added).toMatchObject({ email: "photo.person@fluttersea.com", avatarUrl: url });
     expect(added).not.toHaveProperty("avatarId");
-    const noPhoto = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "no.photo@sisal.com" }).expect(201)).body;
+    const noPhoto = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "no.photo@fluttersea.com" }).expect(201)).body;
     expect(noPhoto.avatarUrl).toBeNull();
 
     const members = (await ctx.api.get(`/api/v1/admin/teams/${team.id}/members`).expect(200)).body.members;
@@ -106,10 +146,10 @@ describe("user avatars", () => {
 
   it("returns absolute avatar URLs to the allowed cross-origin client", async () => {
     const crossOrigin = await createTestContext(":memory:", {
-      env: { ADMIN_EMAILS: "Test@sisal.com", CORS_ORIGIN: "http://localhost:5173" },
+      env: { ADMIN_EMAILS: "Test@fluttersea.com", CORS_ORIGIN: "http://localhost:5173" },
     });
     try {
-      const person = await signInAs(crossOrigin, "photo.person@sisal.com");
+      const person = await signInAs(crossOrigin, "photo.person@fluttersea.com");
       const personId = (await person.get("/api/v1/auth/me").expect(200)).body.user.id;
       const path = await uploadAvatar(person);
 
@@ -123,7 +163,7 @@ describe("user avatars", () => {
       const added = await crossOrigin.api
         .post(`/api/v1/admin/teams/${team.id}/members`)
         .set("Origin", "http://localhost:5173")
-        .send({ email: "photo.person@sisal.com" })
+        .send({ email: "photo.person@fluttersea.com" })
         .expect(201);
       expect(added.body.avatarUrl).toBe(listed.avatarUrl);
     } finally {
@@ -169,23 +209,23 @@ describe("team management", () => {
       .post(`/api/v1/admin/teams/${team.id}/members`)
       .send({ email: " New.Person@Sisal.com ", role: "owner" })
       .expect(201);
-    expect(added.body).toMatchObject({ email: "new.person@sisal.com", role: "owner" });
+    expect(added.body).toMatchObject({ email: "new.person@fluttersea.com", role: "owner" });
 
-    const duplicate = await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "new.person@sisal.com" }).expect(409);
+    const duplicate = await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "new.person@fluttersea.com" }).expect(409);
     expect(duplicate.body.error.code).toBe("TEAM_MEMBER_EXISTS");
     const foreign = await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "someone@example.com" }).expect(400);
     expect(foreign.body.error.code).toBe("EMAIL_DOMAIN_NOT_ALLOWED");
 
     const users = (await ctx.api.get("/api/v1/admin/users?query=new.person").expect(200)).body;
     expect(users.total).toBe(1);
-    expect(users.users[0]).toMatchObject({ email: "new.person@sisal.com", hasSignedIn: false, systemRole: "user" });
+    expect(users.users[0]).toMatchObject({ email: "new.person@fluttersea.com", hasSignedIn: false, systemRole: "user" });
 
     // Signing in later picks up the pre-created account and its membership.
-    const person = await signInAs(ctx, "new.person@sisal.com");
+    const person = await signInAs(ctx, "new.person@fluttersea.com");
     const me = (await person.get("/api/v1/auth/me").expect(200)).body.user;
     expect(me.id).toBe(added.body.userId);
     expect((await person.get("/api/v1/teams").expect(200)).body.teams).toEqual([
-      { id: team.id, name: "Games", description: "", role: "owner" },
+      { id: team.id, name: "Games", description: "", role: "owner", isMember: true },
     ]);
     const detail = (await ctx.api.get(`/api/v1/admin/users/${me.id}`).expect(200)).body;
     expect(detail).toMatchObject({ hasSignedIn: true, teams: [{ id: team.id, name: "Games", role: "owner", archivedAt: null }] });
@@ -193,8 +233,8 @@ describe("team management", () => {
 
   it("protects the last owner and changes roles", async () => {
     const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Sports" }).expect(201)).body;
-    const owner = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "owner@sisal.com", role: "owner" }).expect(201)).body;
-    const member = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "member@sisal.com" }).expect(201)).body;
+    const owner = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "owner@fluttersea.com", role: "owner" }).expect(201)).body;
+    const member = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "member@fluttersea.com" }).expect(201)).body;
     expect(member.role).toBe("member");
 
     expect((await ctx.api.patch(`/api/v1/admin/teams/${team.id}/members/${owner.userId}`).send({ role: "member" }).expect(409)).body.error.code)
@@ -209,25 +249,25 @@ describe("team management", () => {
       .toBe("TEAM_MEMBER_NOT_FOUND");
 
     const members = (await ctx.api.get(`/api/v1/admin/teams/${team.id}/members`).expect(200)).body.members;
-    expect(members.map((m: { email: string; role: string }) => [m.email, m.role])).toEqual([["member@sisal.com", "owner"]]);
+    expect(members.map((m: { email: string; role: string }) => [m.email, m.role])).toEqual([["member@fluttersea.com", "owner"]]);
   });
 
   it("freezes membership of archived teams and hides them from the team switcher", async () => {
     const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Bingo" }).expect(201)).body;
-    await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "player@sisal.com" }).expect(201);
-    const player = await signInAs(ctx, "player@sisal.com");
+    await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "player@fluttersea.com" }).expect(201);
+    const player = await signInAs(ctx, "player@fluttersea.com");
     expect((await player.get("/api/v1/teams").expect(200)).body.teams).toHaveLength(1);
 
     await ctx.api.post(`/api/v1/admin/teams/${team.id}/archive`).expect(200);
     expect((await player.get("/api/v1/teams").expect(200)).body.teams).toEqual([]);
-    const frozen = await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "late@sisal.com" }).expect(409);
+    const frozen = await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "late@fluttersea.com" }).expect(409);
     expect(frozen.body.error.code).toBe("TEAM_ARCHIVED");
   });
 
   it("records every administrative change in the audit log", async () => {
     const team = (await ctx.api.post("/api/v1/admin/teams").send({ name: "Audit" }).expect(201)).body;
-    const member = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "audited@sisal.com" }).expect(201)).body;
-    await ctx.api.patch(`/api/v1/admin/teams/${team.id}/members/${member.userId}`).send({ role: "admin" }).expect(200);
+    const member = (await ctx.api.post(`/api/v1/admin/teams/${team.id}/members`).send({ email: "audited@fluttersea.com" }).expect(201)).body;
+    await ctx.api.patch(`/api/v1/admin/teams/${team.id}/members/${member.userId}`).send({ role: "viewer" }).expect(200);
     await ctx.api.delete(`/api/v1/admin/teams/${team.id}/members/${member.userId}`).expect(204);
     await ctx.api.post("/api/v1/admin/teams").send({ name: "Other" }).expect(201);
 
@@ -239,7 +279,7 @@ describe("team management", () => {
       "team.member_removed",
       "team.member_role_changed",
     ]);
-    expect(log.entries.every((e: { actor: string }) => e.actor === "test@sisal.com")).toBe(true);
+    expect(log.entries.every((e: { actor: string }) => e.actor === "test@fluttersea.com")).toBe(true);
     expect((await ctx.api.get("/api/v1/admin/audit-log").expect(200)).body.total).toBe(5);
   });
 });

@@ -9,6 +9,7 @@ import {
   createTeamContextMiddleware,
   requireSystemAdmin,
 } from "./middleware/authenticate.js";
+import { requireTeamEditor } from "./middleware/teamPermissions.js";
 import { createCorsMiddleware } from "./middleware/cors.js";
 import { createErrorHandler, notFoundHandler, type ErrorHandlerOptions } from "./middleware/errorHandler.js";
 import { createCollectionsRouter } from "./routes/collections.js";
@@ -70,6 +71,11 @@ export function createApp({
   app.use("/health", createHealthRouter());
   const requireAuth = createAuthenticationMiddleware(db, env.AUTH_COOKIE_NAME);
   const requireTeam = createTeamContextMiddleware(db);
+  // A viewer only reads the team's content. Running collections and saving one's own (user-scope)
+  // variables are not edits of shared content, so they stay open to every member.
+  const collectionsEditor = requireTeamEditor((req) => /^\/[^/]+\/(items\/[^/]+\/)?run$/.test(req.path));
+  const variablesEditor = requireTeamEditor((req) => /^\/(order|user(\/[^/]+)?)$/.test(req.path));
+  const contentEditor = requireTeamEditor();
   app.use(
     "/api/v1/preferences",
     express.json({ limit: "256kb" }),
@@ -89,13 +95,13 @@ export function createApp({
   );
 
   app.use("/api/v1/presence", requireAuth, requireTeam, createPresenceRouter(db, presence));
-  app.use("/api/v1/collections", requireAuth, requireTeam, createCollectionRunsRouter(db, env));
-  app.use("/api/v1/collections", requireAuth, requireTeam, createCollectionsRouter(db, events, collectionsOptions));
-  app.use("/api/v1/environments", requireAuth, requireTeam, createEnvironmentsRouter(db, events));
-  app.use("/api/v1/variables", requireAuth, requireTeam, createVariablesRouter(db, events));
-  app.use("/api/v1/trash", requireAuth, requireTeam, createTrashRouter(db, events));
+  app.use("/api/v1/collections", requireAuth, requireTeam, collectionsEditor, createCollectionRunsRouter(db, env));
+  app.use("/api/v1/collections", requireAuth, requireTeam, collectionsEditor, createCollectionsRouter(db, events, collectionsOptions));
+  app.use("/api/v1/environments", requireAuth, requireTeam, contentEditor, createEnvironmentsRouter(db, events));
+  app.use("/api/v1/variables", requireAuth, requireTeam, variablesEditor, createVariablesRouter(db, events));
+  app.use("/api/v1/trash", requireAuth, requireTeam, contentEditor, createTrashRouter(db, events));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
-  app.use("/api/v1/teams", requireAuth, createTeamsRouter(db));
+  app.use("/api/v1/teams", requireAuth, createTeamsRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
   app.use("/api/v1/admin", requireAuth, requireSystemAdmin, createAdminRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
 
   app.use(notFoundHandler);

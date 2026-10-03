@@ -13,6 +13,16 @@ import type { AvatarColor } from "./avatar.js";
 
 export const ALLOWED_EMAIL_DOMAINS = ["fluttersea.com", "sisal.com", "sisal.it"] as const;
 
+/** Every account lives under this domain, whichever allowed domain the person typed. */
+export const CANONICAL_EMAIL_DOMAIN = "fluttersea.com";
+
+/** Rewrites an address to the canonical domain without checking whether the domain is allowed. */
+export function toCanonicalEmail(email: string): string {
+  const normalized = normalizeEmail(email);
+  const at = normalized.lastIndexOf("@");
+  return at < 0 ? normalized : `${normalized.slice(0, at)}@${CANONICAL_EMAIL_DOMAIN}`;
+}
+
 export type SystemRole = "user" | "admin";
 
 export interface AuthUser {
@@ -47,13 +57,18 @@ function isoAfter(seconds: number, now = Date.now()): string {
   return new Date(now + seconds * 1000).toISOString();
 }
 
+/**
+ * Accepts addresses on an allowed domain and returns the canonical address, i.e. the same local
+ * part at `fluttersea.com`. Codes are sent to, and accounts and rate limits keyed by, that address,
+ * so `name@sisal.com`, `name@sisal.it` and `name@fluttersea.com` are one person.
+ */
 export function validateAllowedEmail(email: string): string {
   const normalized = normalizeEmail(email);
   const domain = normalized.slice(normalized.lastIndexOf("@") + 1);
   if (!ALLOWED_EMAIL_DOMAINS.includes(domain as (typeof ALLOWED_EMAIL_DOMAINS)[number])) {
     throw new AuthError(400, "EMAIL_DOMAIN_NOT_ALLOWED", "Email domain is not allowed");
   }
-  return normalized;
+  return toCanonicalEmail(normalized);
 }
 
 async function consumeRateLimit(
@@ -176,7 +191,7 @@ async function openSession(
   let user = await first(tx.select().from(users).where(eq(users.email, email)).limit(1));
   if (!user) throw new Error("User row disappeared while a verified session was being created");
   // Bootstrap only: promotes listed addresses, never demotes, so the admin API stays authoritative.
-  if (user.systemRole !== "admin" && parseEmailList(adminEmails).includes(email)) {
+  if (user.systemRole !== "admin" && parseEmailList(adminEmails).map(toCanonicalEmail).includes(email)) {
     await tx.update(users).set({ systemRole: "admin" }).where(eq(users.id, user.id));
     user = { ...user, systemRole: "admin" };
   }

@@ -52,7 +52,9 @@ export const teams = mysqlTable(
   },
 );
 
-export const TEAM_ROLES = ["owner", "admin", "member"] as const;
+// Per-team role, independent of the system role: owner manages the team's members, member edits its
+// content, viewer only reads it and sends requests.
+export const TEAM_ROLES = ["owner", "member", "viewer"] as const;
 
 export const teamMembers = mysqlTable(
   "team_members",

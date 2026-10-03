@@ -33,7 +33,7 @@ describe("variable-order preferences API", () => {
   });
 
   it("stores the complete document unchanged and only for the signed-in user", async () => {
-    const other = await signInAs(ctx, "preference-other@sisal.com");
+    const other = await signInAs(ctx, "preference-other@fluttersea.com");
     const preferences = {
       version: 1,
       sort: { field: "value", direction: "desc" },

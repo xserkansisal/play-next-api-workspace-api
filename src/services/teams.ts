@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import { first } from "../db/query.js";
 import { adminAuditLog, collections, environments, teamMembers, teams, userAvatars, users, variables } from "../db/schema.js";
@@ -65,7 +65,10 @@ export interface MyTeam {
   id: string;
   name: string;
   description: string;
+  /** The effective role: a system admin who is not a member acts as an owner. */
   role: TeamRole;
+  /** False when the caller sees the team only because they are a system admin. */
+  isMember: boolean;
 }
 
 export interface AuditLogEntry {
@@ -168,7 +171,7 @@ export async function listTeamMembers(db: DbExecutor, teamId: string): Promise<T
   return selectMembers(db, teamId);
 }
 
-const ROLE_ORDER: Record<TeamRole, number> = { owner: 0, admin: 1, member: 2 };
+const ROLE_ORDER: Record<TeamRole, number> = { owner: 0, member: 1, viewer: 2 };
 
 async function selectMembers(db: DbExecutor, teamId: string): Promise<TeamMember[]> {
   const rows = await db
@@ -536,14 +539,35 @@ export async function listAuditLog(
   return { entries: rows, total: Number(total?.value ?? 0) };
 }
 
-/** The teams a user may switch between: memberships of teams that are not archived. */
-export async function listMyTeams(db: AppDatabase, userId: string): Promise<MyTeam[]> {
+/**
+ * The teams a user may switch between: memberships of teams that are not archived. A system admin
+ * sees every non-archived team and acts as an owner in those they do not belong to.
+ */
+export async function listMyTeams(db: AppDatabase, user: AccessUser): Promise<MyTeam[]> {
   const rows = await db
-    .select({ id: teams.id, name: teams.name, description: teams.description, role: teamMembers.role })
-    .from(teamMembers)
-    .innerJoin(teams, eq(teamMembers.teamId, teams.id))
-    .where(and(eq(teamMembers.userId, userId), isNull(teams.archivedAt)));
-  return rows.sort(compareByName);
+    .select({
+      id: teams.id,
+      name: teams.name,
+      description: teams.description,
+      role: teamMembers.role,
+    })
+    .from(teams)
+    .leftJoin(teamMembers, and(eq(teamMembers.teamId, teams.id), eq(teamMembers.userId, user.id)))
+    .where(and(isNull(teams.archivedAt), user.systemRole === "admin" ? undefined : isNotNull(teamMembers.role)));
+  return rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      role: row.role ?? "owner",
+      isMember: row.role !== null,
+    }))
+    .sort(compareByName);
+}
+
+export interface AccessUser {
+  id: string;
+  systemRole: SystemRole;
 }
 
 export interface TeamContext {
@@ -567,4 +591,98 @@ export async function findActiveMemberships(db: DbExecutor, userId: string, team
       ...(teamId === undefined ? [] : [eq(teams.id, teamId)]),
     ))
     .limit(teamId === undefined ? 1000 : 1);
+}
+
+/**
+ * Resolves the caller's access to one team. A member gets their own role; a system admin may enter
+ * any non-archived team and acts as an owner there. Anyone else, and any archived or unknown team,
+ * yields undefined so the team's existence is never confirmed.
+ */
+export async function findTeamAccess(db: DbExecutor, user: AccessUser, teamId: string): Promise<TeamContext | undefined> {
+  const [membership] = await findActiveMemberships(db, user.id, teamId);
+  if (membership || user.systemRole !== "admin") return membership;
+  const team = await first(
+    db.select({ id: teams.id, name: teams.name }).from(teams).where(and(eq(teams.id, teamId), isNull(teams.archivedAt))).limit(1),
+  );
+  return team && { ...team, role: "owner" };
+}
+
+const AUTHORSHIP_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ["teams", "created_by"],
+  ["teams", "updated_by"],
+  ["team_members", "added_by"],
+  ["collections", "created_by"],
+  ["collections", "updated_by"],
+  ["collection_versions", "created_by"],
+  ["items", "created_by"],
+  ["items", "updated_by"],
+  ["item_versions", "created_by"],
+  ["environments", "created_by"],
+  ["environments", "updated_by"],
+  ["variables", "updated_by"],
+  ["admin_audit_log", "actor_id"],
+];
+
+const USER_OWNED_TABLES = [
+  "test_runs",
+  "variables",
+  "variable_display_orders",
+  "auth_sessions",
+  "team_members",
+  "user_avatars",
+  "user_preferences",
+  "presence_test_users",
+] as const;
+
+/**
+ * Permanently removes an account and what only it owned (sessions, memberships, runs, personal
+ * variables, preferences, avatar). Shared content it authored stays with the authorship cleared.
+ * Returns the teams the user belonged to so callers can end their open streams.
+ */
+export function deleteUser(db: AppDatabase, userId: string, actorId: string): Promise<{ teamIds: string[] }> {
+  return db.transaction(async (tx) => {
+    const admins = await tx.select({ id: users.id }).from(users).where(eq(users.systemRole, "admin")).for("update");
+    const target = await first(tx.select().from(users).where(eq(users.id, userId)).limit(1).for("update"));
+    if (!target) throw new NotFoundError(`User ${userId} not found`, "USER_NOT_FOUND");
+    if (userId === actorId) throw new ConflictError("You cannot delete your own account", "CANNOT_DELETE_SELF");
+    if (target.systemRole === "admin" && admins.length === 1) {
+      throw new ConflictError("The system must keep at least one administrator", "LAST_SYSTEM_ADMIN");
+    }
+
+    const memberships = await tx.select().from(teamMembers).where(eq(teamMembers.userId, userId)).for("update");
+    for (const membership of memberships) {
+      if (membership.role !== "owner") continue;
+      const owners = await tx
+        .select({ userId: teamMembers.userId })
+        .from(teamMembers)
+        .where(and(eq(teamMembers.teamId, membership.teamId), eq(teamMembers.role, "owner")))
+        .for("update");
+      if (owners.length === 1) {
+        throw new ConflictError(
+          `User is the only owner of team ${membership.teamId}; assign another owner first`,
+          "TEAM_LAST_OWNER",
+          { teamId: membership.teamId },
+        );
+      }
+    }
+
+    for (const [table, column] of AUTHORSHIP_COLUMNS) {
+      await tx.execute(sql`UPDATE ${sql.identifier(table)} SET ${sql.identifier(column)} = NULL WHERE ${sql.identifier(column)} = ${userId}`);
+    }
+    for (const table of USER_OWNED_TABLES) {
+      await tx.execute(sql`DELETE FROM ${sql.identifier(table)} WHERE user_id = ${userId}`);
+    }
+    await tx.execute(sql`DELETE FROM auth_codes WHERE email = ${target.email}`);
+    await tx.execute(sql`DELETE FROM auth_rate_limits WHERE email = ${target.email}`);
+    await tx.delete(users).where(eq(users.id, userId));
+    await recordAudit(tx, {
+      actorId,
+      action: "user.deleted",
+      targetType: "user",
+      targetId: userId,
+      teamId: null,
+      details: { email: target.email, systemRole: target.systemRole },
+    });
+    return { teamIds: memberships.map((membership) => membership.teamId) };
+  });
 }

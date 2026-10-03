@@ -24,9 +24,9 @@ const inTeam = (teamId: string) => ({
 });
 
 beforeEach(async () => {
-  ctx = await createTestContext(":memory:", { env: { ADMIN_EMAILS: "test@sisal.com" } });
+  ctx = await createTestContext(":memory:", { env: { ADMIN_EMAILS: "test@fluttersea.com" } });
   otherTeamId = await createTeamRow(ctx.db, "Payments");
-  await addTeamMembership(ctx.db, "test@sisal.com", otherTeamId, "member");
+  await addTeamMembership(ctx.db, "test@fluttersea.com", otherTeamId, "member");
 });
 
 afterEach(async () => ctx.close());
@@ -38,13 +38,13 @@ describe("choosing a team", () => {
     await inTeam(ctx.teamId).get("/api/v1/collections").expect(200);
     await ctx.api.get(`/api/v1/collections?teamId=${otherTeamId}`).expect(200);
 
-    const single = await signInAs("single@sisal.com");
-    await addTeamMembership(ctx.db, "single@sisal.com", otherTeamId);
+    const single = await signInAs("single@fluttersea.com");
+    await addTeamMembership(ctx.db, "single@fluttersea.com", otherTeamId);
     await single.get("/api/v1/collections").expect(200);
   });
 
   it("refuses users without a team and teams the user is not in", async () => {
-    const lonely = await signInAs("lonely@sisal.com");
+    const lonely = await signInAs("lonely@fluttersea.com");
     expect((await lonely.get("/api/v1/environments").expect(403)).body.error.code).toBe("TEAM_MEMBERSHIP_REQUIRED");
     expect((await lonely.get("/api/v1/variables").set("X-Team-Id", ctx.teamId).expect(404)).body.error.code)
       .toBe("TEAM_NOT_FOUND");
@@ -54,9 +54,18 @@ describe("choosing a team", () => {
     await lonely.get("/api/v1/teams").expect(200);
   });
 
-  it("does not grant system admins access to teams they are not in", async () => {
+  it("lets system admins work in any active team as an owner, but nobody else", async () => {
     const foreign = await createTeamRow(ctx.db, "Bingo");
-    await inTeam(foreign).get("/api/v1/collections").expect(404);
+    await inTeam(foreign).get("/api/v1/collections").expect(200);
+    await inTeam(foreign).post("/api/v1/collections").send({ name: "From admin" }).expect(201);
+    const listed = (await ctx.api.get("/api/v1/teams").expect(200)).body.teams;
+    expect(listed.find((t: { id: string }) => t.id === foreign)).toMatchObject({ role: "owner", isMember: false });
+    expect(listed.find((t: { id: string }) => t.id === otherTeamId)).toMatchObject({ role: "member", isMember: true });
+
+    const stranger = await signInAs("stranger@fluttersea.com");
+    await addTeamMembership(ctx.db, "stranger@fluttersea.com", otherTeamId);
+    await stranger.get("/api/v1/collections").set("X-Team-Id", foreign).expect(404);
+    expect((await stranger.get("/api/v1/teams").expect(200)).body.teams).toHaveLength(1);
   });
 
   it("stops serving a team as soon as it is archived", async () => {
@@ -200,9 +209,9 @@ describe("team event streams", () => {
   it("closes the stream of a member removed from the team", async () => {
     const stream = await connectReady(ctx.teamId);
     const otherTeamStream = await connectReady(otherTeamId);
-    const [self] = await queryRows(ctx.db, "SELECT id FROM users WHERE email = 'test@sisal.com'");
+    const [self] = await queryRows(ctx.db, "SELECT id FROM users WHERE email = 'test@fluttersea.com'");
     // The test user is the team's only owner; hand ownership over before leaving.
-    await ctx.api.post(`/api/v1/admin/teams/${ctx.teamId}/members`).send({ email: "keeper@sisal.com", role: "owner" }).expect(201);
+    await ctx.api.post(`/api/v1/admin/teams/${ctx.teamId}/members`).send({ email: "keeper@fluttersea.com", role: "owner" }).expect(201);
     await ctx.api.delete(`/api/v1/admin/teams/${ctx.teamId}/members/${self!.id}`).expect(204);
     let ended = false;
     void stream.ended.then(() => {
@@ -210,7 +219,6 @@ describe("team event streams", () => {
     });
     await waitUntil(() => ended);
     expect(otherTeamStream.response.destroyed).toBe(false);
-    expect((await inTeam(ctx.teamId).get("/api/v1/collections").expect(404)).body.error.code).toBe("TEAM_NOT_FOUND");
   });
 });
 
@@ -230,7 +238,7 @@ describe("migration of existing data", () => {
     ]);
   });
 
-  it("seeds the initial teams, each with its admin, without signing anyone in", async () => {
+  it("seeds the initial teams, each with its owner, without signing anyone in", async () => {
     const rows = await queryRows(
       ctx.db,
       `SELECT t.name, u.email, u.first_name, u.last_name, m.role,
@@ -238,24 +246,24 @@ describe("migration of existing data", () => {
        FROM teams t
        INNER JOIN team_members m ON m.team_id = t.id
        INNER JOIN users u ON u.id = m.user_id
-       WHERE t.id LIKE '00000000-0000-4000-8000-0000000001%' AND m.role = 'admin'
+       WHERE t.id LIKE '00000000-0000-4000-8000-0000000001%' AND m.role = 'owner' AND u.email <> 'test@fluttersea.com'
        ORDER BY t.id`,
     );
     expect(rows.map((row) => [row.name, row.email, row.role, Number(row.signed_in)])).toEqual([
-      ["Game Studio", "umit.cakir@fluttersea.com", "admin", 0],
-      ["Mobile Gaming", "arman.kara@fluttersea.com", "admin", 0],
-      ["PAM", "mertkan.yener@fluttersea.com", "admin", 0],
-      ["Cross Module", "oguz.avci@fluttersea.com", "admin", 0],
-      ["Lottery", "berk.yavuz@fluttersea.com", "admin", 0],
-      ["Hybrid App", "burak.akyol@fluttersea.com", "admin", 0],
-      ["Native App", "kubilay.aydin@fluttersea.com", "admin", 0],
+      ["Game Studio", "umit.cakir@fluttersea.com", "owner", 0],
+      ["Mobile Gaming", "arman.kara@fluttersea.com", "owner", 0],
+      ["PAM", "mertkan.yener@fluttersea.com", "owner", 0],
+      ["Cross Module", "oguz.avci@fluttersea.com", "owner", 0],
+      ["Lottery", "berk.yavuz@fluttersea.com", "owner", 0],
+      ["Hybrid App", "burak.akyol@fluttersea.com", "owner", 0],
+      ["Native App", "kubilay.aydin@fluttersea.com", "owner", 0],
     ]);
     expect(rows[0]).toMatchObject({ first_name: "Umit", last_name: "Cakir" });
 
     const gameStudio = await queryRows(
       ctx.db,
       `SELECT u.email, m.role FROM team_members m INNER JOIN users u ON u.id = m.user_id
-       WHERE m.team_id = '00000000-0000-4000-8000-000000000101' AND u.email <> 'test@sisal.com' ORDER BY u.email`,
+       WHERE m.team_id = '00000000-0000-4000-8000-000000000101' AND u.email <> 'test@fluttersea.com' ORDER BY u.email`,
     );
     expect(gameStudio.map((row) => [row.email, row.role])).toEqual([
       ["ali.ghadiri@fluttersea.com", "member"],
@@ -263,13 +271,13 @@ describe("migration of existing data", () => {
       ["hakan.toker@fluttersea.com", "member"],
       ["onur.ozuyguz@fluttersea.com", "member"],
       ["serkan.taghan@fluttersea.com", "member"],
-      ["umit.cakir@fluttersea.com", "admin"],
+      ["umit.cakir@fluttersea.com", "owner"],
     ]);
 
     // Signing in later picks up the seeded account and its team.
     const admin = await signInAs("umit.cakir@fluttersea.com");
     expect((await admin.get("/api/v1/teams").expect(200)).body.teams).toEqual([
-      { id: "00000000-0000-4000-8000-000000000101", name: "Game Studio", description: "", role: "admin" },
+      { id: "00000000-0000-4000-8000-000000000101", name: "Game Studio", description: "", role: "owner", isMember: true },
     ]);
     await admin.get("/api/v1/collections").expect(200);
   });

@@ -22,7 +22,7 @@ describe("version history API", () => {
     expect(history.body.versions).toHaveLength(1);
     expect(history.body.versions[0]).toMatchObject({
       snapshot: { name: "Main", description: "Initial" },
-      createdBy: "test@sisal.com",
+      createdBy: "test@fluttersea.com",
     });
 
     const restored = await ctx.api

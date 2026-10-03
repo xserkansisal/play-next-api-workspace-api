@@ -126,7 +126,7 @@ export function createAuthRouter(
         res.status(503).json({ error: { code: "AUTH_DELIVERY_FAILED", message: "Unable to send sign-in code" } });
         return;
       }
-      res.status(202).json({ message: "If the address is eligible, a sign-in code has been sent." });
+      res.status(202).json({ message: "If the address is eligible, a sign-in code has been sent.", email: issued.email });
     } catch (err) {
       next(err);
     }

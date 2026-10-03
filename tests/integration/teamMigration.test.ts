@@ -33,7 +33,7 @@ describe("moving pre-team resources to Game Studio", () => {
       [DEFAULT_TEAM, now, now],
     );
     await db.$client.query(
-      "INSERT INTO users (id, email, created_at) VALUES ('u-1', 'legacy.user@sisal.com', ?)",
+      "INSERT INTO users (id, email, created_at) VALUES ('u-1', 'legacy.user@fluttersea.com', ?)",
       [now],
     );
     await db.$client.query(

@@ -176,7 +176,7 @@ It connects and authenticates without sending, and exits non-zero with the under
 failure. A pass rules out an unreachable host, a wrong TLS mode and rejected credentials; it does
 not prove mail is delivered, because relaying rules, SPF/DMARC and recipient filtering all apply
 after this point. Follow it with one real sign-in to an address in an allowed domain
-(`fluttersea.com`, `sisal.com`, `sisal.it`).
+(`fluttersea.com`, `sisal.com`, `sisal.it`), always rewritten to `@fluttersea.com`. Migration `0018` deletes accounts that signed in with any other domain.
 
 If a sign-in code cannot be delivered, the caller receives `503 AUTH_DELIVERY_FAILED` with no
 reason - disclosing it would reveal that the address is eligible. The reason is written to the

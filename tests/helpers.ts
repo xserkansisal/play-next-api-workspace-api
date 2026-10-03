@@ -36,7 +36,7 @@ export async function addTeamMembership(
   db: AppDatabase,
   email: string,
   teamId = DEFAULT_TEAM_ID,
-  role: "owner" | "admin" | "member" = "member",
+  role: "owner" | "member" | "viewer" = "member",
 ): Promise<void> {
   await db.$client.query(
     `INSERT IGNORE INTO team_members (team_id, user_id, role, created_at)
@@ -154,9 +154,9 @@ export async function createTestContext(path = ":memory:", options: TestContextO
   if (options.authenticate !== false) {
     await unauthenticatedApi
       .post("/api/v1/auth/request-code")
-      .send({ email: "test@sisal.com" })
+      .send({ email: "test@fluttersea.com" })
       .expect(202);
-    const message = emailSender.getMessage("test@sisal.com");
+    const message = emailSender.getMessage("test@fluttersea.com");
     if (!message) throw new Error("Test email sender did not retain the requested code");
     const login = await api
       .post("/api/v1/auth/verify-code")
@@ -165,7 +165,7 @@ export async function createTestContext(path = ":memory:", options: TestContextO
     const setCookie = login.headers["set-cookie"]?.[0];
     if (!setCookie) throw new Error("Sign-in did not issue a session cookie");
     sessionCookie = setCookie.split(";", 1)[0]!;
-    await addTeamMembership(db, "test@sisal.com", DEFAULT_TEAM_ID, "owner");
+    await addTeamMembership(db, "test@fluttersea.com", DEFAULT_TEAM_ID, "owner");
   }
   return {
     db,

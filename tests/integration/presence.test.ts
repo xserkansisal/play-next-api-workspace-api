@@ -67,7 +67,7 @@ describe("live presence", () => {
       avatarColor: null,
       location,
     });
-    expect(JSON.stringify(snapshot)).not.toContain("test@sisal.com");
+    expect(JSON.stringify(snapshot)).not.toContain("test@fluttersea.com");
     expect(JSON.stringify(snapshot)).not.toContain("secret.example");
     expect(JSON.stringify(snapshot)).not.toContain("never broadcast");
     expect(JSON.stringify(snapshot)).not.toContain("tab-1");

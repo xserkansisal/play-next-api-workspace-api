@@ -84,7 +84,7 @@ describe("POST /api/v1/collections/:collectionId/import", () => {
     const tree = await readTree(collection.id);
     expect(names(tree.items)).toEqual(["Auth", "Existing", "Health"]);
     const auth = tree.items[0];
-    expect(auth).toMatchObject({ type: "folder", description: "Sign-in", parentId: null, createdBy: "test@sisal.com" });
+    expect(auth).toMatchObject({ type: "folder", description: "Sign-in", parentId: null, createdBy: "test@fluttersea.com" });
     expect(names(auth.items)).toEqual(["Login", "Tokens"]);
     expect(auth.items[0]).toMatchObject({
       method: "POST",

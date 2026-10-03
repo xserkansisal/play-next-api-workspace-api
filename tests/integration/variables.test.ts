@@ -31,7 +31,7 @@ describe("scoped variables", () => {
   });
 
   it("persists a complete display order privately, including names with no API variable row", async () => {
-    const other = await signInAs(ctx, "order-private@sisal.com");
+    const other = await signInAs(ctx, "order-private@fluttersea.com");
     await ctx.api.put("/api/v1/variables/user/token").send({ value: "unchanged" }).expect(200);
 
     expect((await ctx.api.get("/api/v1/variables/order").expect(200)).body).toEqual({ order: [] });
@@ -79,7 +79,7 @@ describe("scoped variables", () => {
   });
 
   it("creates scoped variables without overwriting existing keys", async () => {
-    const other = await signInAs(ctx, "global-create-other@sisal.com");
+    const other = await signInAs(ctx, "global-create-other@fluttersea.com");
     const created = await ctx.api
       .post("/api/v1/variables/user")
       .send({ key: "token", value: "" })
@@ -113,7 +113,7 @@ describe("scoped variables", () => {
   });
 
   it("keeps one person's user-scope value entirely out of another's", async () => {
-    const other = await signInAs(ctx, "someone-else@sisal.com");
+    const other = await signInAs(ctx, "someone-else@fluttersea.com");
     await ctx.api.put("/api/v1/variables/user/token").send({ value: "mine" }).expect(200);
     await other.put("/api/v1/variables/user/token").send({ value: "theirs" }).expect(200);
 
@@ -124,7 +124,7 @@ describe("scoped variables", () => {
   });
 
   it("shares a global value with everyone and lets either person replace it", async () => {
-    const other = await signInAs(ctx, "teammate@sisal.com");
+    const other = await signInAs(ctx, "teammate@fluttersea.com");
     await ctx.api.put("/api/v1/variables/global/baseUrl").send({ value: "http://one" }).expect(200);
 
     const seenByOther = await other.get("/api/v1/variables").expect(200);
@@ -190,7 +190,7 @@ describe("scoped variables", () => {
   });
 
   it("will not let one person delete another's user-scope value", async () => {
-    const other = await signInAs(ctx, "victim@sisal.com");
+    const other = await signInAs(ctx, "victim@fluttersea.com");
     await other.put("/api/v1/variables/user/token").send({ value: "theirs" }).expect(200);
 
     await ctx.api.delete("/api/v1/variables/user/token").expect(404);

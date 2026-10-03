@@ -3,7 +3,7 @@ import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import { findSessionUser, type AuthUser } from "../auth/service.js";
 import { HttpError } from "../errors.js";
-import { findActiveMemberships, type TeamContext } from "../services/teams.js";
+import { findActiveMemberships, findTeamAccess, type TeamContext } from "../services/teams.js";
 
 declare global {
   namespace Express {
@@ -69,16 +69,18 @@ export const requireSystemAdmin: RequestHandler = (req, res, next) => {
  * in it; anyone with several must choose. A team the caller does not belong to - or that is
  * archived - answers exactly like one that does not exist, so ids of other teams are never
  * confirmed. Membership is read per request, so a removal takes effect on the very next call.
- * Being a system admin grants nothing here.
+ * A system admin may name any non-archived team and acts as an owner in it; without a header the
+ * fallback below only considers real memberships.
  */
 export function createTeamContextMiddleware(db: AppDatabase): RequestHandler {
   return async (req, res, next) => {
     const userId = authenticatedUserId(req);
+    const user = req.authUser!;
     const fromQuery = typeof req.query.teamId === "string" ? req.query.teamId : undefined;
     const requested = req.get(TEAM_HEADER)?.trim() || fromQuery?.trim() || undefined;
 
     if (requested !== undefined) {
-      const [team] = requested.length <= 36 ? await findActiveMemberships(db, userId, requested) : [];
+      const team = requested.length <= 36 ? await findTeamAccess(db, user, requested) : undefined;
       if (!team) {
         res.status(404).json({ error: { code: "TEAM_NOT_FOUND", message: `Team ${requested} not found` } });
         return;

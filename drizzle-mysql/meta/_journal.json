@@ -120,6 +120,27 @@
       "when": 1790943588149,
       "tag": "0016_seed_system_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1790953866796,
+      "tag": "0017_team_roles_viewer",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1790954635509,
+      "tag": "0018_remove_non_fluttersea_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1790957412829,
+      "tag": "0019_restore_team_owners",
+      "breakpoints": true
     }
   ]
 }

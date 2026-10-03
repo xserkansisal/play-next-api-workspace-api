@@ -18,7 +18,7 @@ PM2 config pins it to `false`. With the flag off, `POST /api/v1/auth/dev-login` 
 `POST /api/v1/auth/dev-login`
 
 ```json
-{ "email": "name.surname@sisal.com" }
+{ "email": "name.surname@sisal.com" } // signed in as name.surname@fluttersea.com
 ```
 
 - `200` returns exactly what `verify-code` returns, and sets the same session cookie:

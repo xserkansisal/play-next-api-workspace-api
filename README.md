@@ -173,8 +173,10 @@ stored random location once per minute. This switch is rejected in production. U
 ## Teams and administration
 
 Users hold a system-wide `systemRole` (`user` or `admin`, returned on `verify-code` and `/me`)
-and belong to any number of teams with a per-team role of `owner`, `admin` or `member`. A system
-admin manages teams and users but does not see any team's content by holding that role. The first
+and belong to any number of teams with a per-team role of `owner`, `member` or `viewer`: viewers
+read a team's content and send requests, members also edit it, owners also manage their team's
+members. A user in no team has no team access. A system admin manages teams and users and can work
+in every team as an owner. See [frontend-teams.md](docs/frontend-teams.md#3a-roles-and-permissions). The first
 admins come from `ADMIN_EMAILS`; after that, roles are granted with
 `PATCH /api/v1/admin/users/:userId`. Every route under `/api/v1/admin` returns `403 ADMIN_REQUIRED`
 to anyone else, and the role is checked on every request, so a demotion takes effect immediately.
@@ -187,9 +189,11 @@ to anyone else, and the role is checked on every request, so a demotion takes ef
 | POST | `/api/v1/admin/teams/:teamId/archive` / `unarchive` | Archive or restore a team |
 | DELETE | `/api/v1/admin/teams/:teamId` | Permanently delete an archived team (`409 TEAM_NOT_ARCHIVED` otherwise; `409 TEAM_NOT_EMPTY` while any collection, environment or global variable, trashed ones included, still belongs to it) |
 | GET/POST | `/api/v1/admin/teams/:teamId/members` | List / add a member by email. Body: `{ "email", "role"? }` (default `member`) |
+| GET/POST/PATCH/DELETE | `/api/v1/teams/:teamId/members[/:userId]` | Same member management for the team's owners (reading: any member) |
 | PATCH/DELETE | `/api/v1/admin/teams/:teamId/members/:userId` | Change a member's `role` / remove the member |
 | GET | `/api/v1/admin/users` | Search users (`?query=&limit=&offset=`); returns `{ users, total }`, each user with `avatarUrl` |
 | GET/PATCH | `/api/v1/admin/users/:userId` | Read a user with their teams / set `systemRole` |
+| DELETE | `/api/v1/admin/users/:userId` | Permanently delete a user (sessions, memberships, runs, personal data); shared content keeps `null` authorship. 409 for self, last system admin, or sole team owner |
 | GET | `/api/v1/admin/audit-log` | Administrative changes, newest first (`?teamId=&limit=&offset=`) |
 
 Rules:
@@ -384,7 +388,7 @@ by `tests/unit/skillExample.test.ts`.
 
 ## Email code sign-in
 
-Only `fluttersea.com`, `sisal.com`, and `sisal.it` addresses can request a six-digit code.
+Only `fluttersea.com`, `sisal.com`, and `sisal.it` addresses can request a six-digit code. Whatever the accepted domain, the address is rewritten to `<local-part>@fluttersea.com`: the code is sent there and the account is always the `@fluttersea.com` one.
 Codes expire after 15 minutes by default, are stored only as peppered HMAC hashes, are
 single-use, and are invalidated after five failed attempts. Code requests and verification
 attempts are rate-limited independently per normalized email. Responses do not disclose whether
@@ -467,7 +471,7 @@ arrives - relaying rules, SPF/DMARC and recipient filtering are decided after th
 a real send exercises those. What it does rule out is the majority of setup failures: an
 unreachable host, a `SMTP_SECURE` that does not match the port, and credentials the relay rejects.
 
-Only `fluttersea.com`, `sisal.com` and `sisal.it` addresses can request a code
+Only `fluttersea.com`, `sisal.com` and `sisal.it` addresses (canonicalized to `@fluttersea.com`) can request a code
 (`ALLOWED_EMAIL_DOMAINS` in `src/auth/service.ts`), so a test send has to go to one of those.
 
 If delivery fails, the caller gets `503 AUTH_DELIVERY_FAILED` with no reason - naming it would

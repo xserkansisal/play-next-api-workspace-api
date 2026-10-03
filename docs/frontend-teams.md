@@ -10,7 +10,9 @@ describes the new admin panel API. Each section ends with what the frontend must
   exactly one team.
 - The user works in **one selected team at a time**. The frontend tells the API which team with
   the `X-Team-Id` header (or `?teamId=` on `EventSource`).
-- A new **system admin** role manages teams and memberships through `/api/v1/admin/*`.
+- A **system admin** manages teams and memberships through `/api/v1/admin/*` and can work in
+  every team. Inside a team, the user's **team role** (`owner`, `member`, `viewer`) decides what
+  they may do (section 3a).
 - All existing data was moved into the **Game Studio** team.
 
 Unchanged: the auth flow, session cookie, request/response shapes of collections, items,
@@ -43,9 +45,9 @@ Returns the signed-in user's non-archived teams, sorted by name. It needs no tea
 }
 ```
 
-`role` is the user's role in that team: `owner`, `admin` or `member`. **Team roles currently grant
-no extra permissions in the workspace** — every member can read and edit all of the team's
-content. Only system admins can manage teams and memberships. You may show the role as a badge.
+`role` is the user's effective role in that team: `owner`, `member` or `viewer` (see 3a).
+`isMember` is `false` when a system admin sees a team they do not belong to; for those the role is
+`owner`. A system admin gets **every** non-archived team in this list; everyone else only their own.
 
 **Frontend:**
 
@@ -57,6 +59,37 @@ content. Only system admins can manage teams and memberships. You may show the r
 3. If the list is empty, show a "You are not a member of any team yet. Ask an administrator to add
    you." screen instead of the workspace. System admins can still open the admin panel.
 4. Show a team switcher (e.g. in the header) only when the user has more than one team.
+
+## 3a. Roles and permissions
+
+A user with no team membership has no access to any team. Roles are **per team**: the same person
+can be `owner` of one team and `viewer` of another; the role of the selected team applies.
+
+| Role | Can | Cannot |
+| --- | --- | --- |
+| `viewer` | Read the team's collections, items, environments, variables, Trash and versions; send requests (`/api/v1/proxy`); run collections (own history); keep personal (`user`-scope) variables and preferences; presence and the change stream | Create, edit, delete, move, clone, import or restore anything shared (collections, items, environments, team variables, Trash) |
+| `member` | Everything a viewer can, plus create/edit/delete/restore the team's content and write team (`global`) variables | Manage the team's members |
+| `owner` | Everything a member can, plus list/add/remove members and change their roles in **their own team** (`/api/v1/teams/:teamId/members`) | Touch other teams, create/archive/delete teams, change system roles |
+| system admin (`systemRole: "admin"`) | Everything, in every non-archived team (acts as `owner`), plus the whole `/api/v1/admin/*` panel | Demote the last system admin |
+
+A write a viewer is not allowed to make answers `403` with code `TEAM_ROLE_REQUIRED`. Hide or
+disable edit controls for viewers (and member-management for non-owners) and treat this code as a
+fallback. A team must always keep at least one owner (`TEAM_LAST_OWNER`).
+
+The former `admin` team role was removed; existing holders became `owner`.
+
+### Member management for owners
+
+| Method | Route | Who | Body / response |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/:teamId/members` | any member, system admin | `{ members: TeamMember[] }` |
+| POST | `/api/v1/teams/:teamId/members` | owner, system admin | `{ email, role? }` (default `member`) → `201 TeamMember` |
+| PATCH | `/api/v1/teams/:teamId/members/:userId` | owner, system admin | `{ role }` → `TeamMember` |
+| DELETE | `/api/v1/teams/:teamId/members/:userId` | owner, system admin | `204` |
+
+Same rules and error codes as the admin endpoints of the same name (section 9). A team the caller
+cannot enter answers `404 TEAM_NOT_FOUND`; a non-owner gets `403 TEAM_ROLE_REQUIRED` on writes.
+Changes by owners appear in the audit log with the owner as actor.
 
 ## 4. Sending the selected team
 
@@ -90,6 +123,7 @@ Errors keep the usual shape `{ "error": { "code": string, "message": string } }`
 | --- | --- | --- | --- |
 | 400 | `TEAM_CONTEXT_REQUIRED` | No team sent and the user is in several | Bug: the header is missing |
 | 403 | `TEAM_MEMBERSHIP_REQUIRED` | The user is in no team | Show the "no team" screen |
+| 403 | `TEAM_ROLE_REQUIRED` | The role in this team is too low for the write (e.g. viewer editing) | Show a "no permission" message; refresh the role via `GET /api/v1/teams` |
 | 404 | `TEAM_NOT_FOUND` | The team does not exist, is archived, or the user was removed from it | Refetch `GET /api/v1/teams`, select another team (or show the "no team" screen), drop the old team's cached data and tell the user they no longer have access |
 
 Treat `TEAM_NOT_FOUND` as a global handler in the HTTP client, because it can arrive on any
@@ -155,12 +189,12 @@ Keep per-user settings (theme, variable display order from `/api/v1/preferences/
 ## 9. Admin panel (`/api/v1/admin/*`)
 
 Available only to `systemRole === "admin"`; everyone else gets `403 ADMIN_REQUIRED`. No team
-header is needed. A system admin does **not** see a team's content unless they are a member of it.
+header is needed. A system admin can also open any team's content by sending its `X-Team-Id`, as an owner.
 
 ### Types
 
 ```ts
-type TeamRole = "owner" | "admin" | "member";
+type TeamRole = "owner" | "member" | "viewer";
 
 interface TeamSummary {
   id: string; name: string; description: string; memberCount: number;
@@ -187,7 +221,8 @@ interface AuditLogEntry {
   id: string; actor: string | null; // actor email
   action: "team.created" | "team.updated" | "team.archived" | "team.unarchived" | "team.deleted"
     | "team.member_added" | "team.member_role_changed" | "team.member_removed"
-    | "user.system_role_changed";
+    | "user.system_role_changed"
+    | "user.deleted";
   targetType: "team" | "team_member" | "user"; targetId: string; teamId: string | null;
   details: Record<string, unknown>; createdAt: string;
 }
@@ -211,6 +246,7 @@ interface AuditLogEntry {
 | GET | `/api/v1/admin/users` | `?query=&limit=50&offset=0` (limit ≤ 200) | `{ users: AdminUser[], total }` |
 | GET | `/api/v1/admin/users/:userId` | | `AdminUserDetail` |
 | PATCH | `/api/v1/admin/users/:userId` | `{ systemRole: "user" \| "admin" }` | `AdminUserDetail` |
+| DELETE | `/api/v1/admin/users/:userId` | | `204`. Permanently deletes the account. `409 CANNOT_DELETE_SELF`, `LAST_SYSTEM_ADMIN`, `TEAM_LAST_OWNER` (assign another owner first) |
 | GET | `/api/v1/admin/audit-log` | `?teamId=&limit=50&offset=0` | `{ entries: AuditLogEntry[], total }` |
 
 ### Rules and error codes

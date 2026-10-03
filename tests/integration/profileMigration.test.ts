@@ -23,7 +23,7 @@ describe("user profile migration", () => {
     await context.db.$client.query(
       `INSERT INTO \`${table}\` (id, email, created_at) VALUES
         ('ada', '..ada...marie..lovelace..@example.com', '2026-01-01T00:00:00.000Z'),
-        ('single', 'serkan@sisal.com', '2026-01-01T00:00:00.000Z'),
+        ('single', 'serkan@fluttersea.com', '2026-01-01T00:00:00.000Z'),
         ('invalid', 'legacy-address', '2026-01-01T00:00:00.000Z')`,
     );
 

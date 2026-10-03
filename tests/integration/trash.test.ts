@@ -188,7 +188,7 @@ describe("Trash API", () => {
     const restored = await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(200);
     expect(restored.body).toMatchObject({
       kind: "environment",
-      environment: { id: env.id, name: env.name, createdBy: env.createdBy, updatedBy: "test@sisal.com" },
+      environment: { id: env.id, name: env.name, createdBy: env.createdBy, updatedBy: "test@fluttersea.com" },
     });
     expect(Date.parse(restored.body.environment.updatedAt)).toBeGreaterThan(Date.parse(env.updatedAt));
     await ctx.api.post(`/api/v1/trash/${env.id}/restore`).expect(404);

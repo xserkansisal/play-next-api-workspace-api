@@ -19,7 +19,7 @@ async function setup(options: Parameters<typeof createTestContext>[1] = {}) {
   return ctx;
 }
 
-async function issueCode(context: TestContext, email = "person@sisal.com") {
+async function issueCode(context: TestContext, email = "person@fluttersea.com") {
   await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email }).expect(202);
   const message = context.emailSender.getMessage(email);
   if (!message) throw new Error("Test sender did not retain sign-in code");
@@ -49,7 +49,10 @@ describe("email code sign-in", () => {
     const context = await setup();
     for (const email of ["dev@fluttersea.com", "dev@sisal.com", "dev@sisal.it"]) {
       const response = await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email }).expect(202);
-      expect(response.body).toEqual({ message: "If the address is eligible, a sign-in code has been sent." });
+      expect(response.body).toEqual({
+        message: "If the address is eligible, a sign-in code has been sent.",
+        email: "dev@fluttersea.com",
+      });
     }
     for (const email of ["dev@example.com", "dev@sub.sisal.com"]) {
       const response = await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email }).expect(400);
@@ -57,9 +60,25 @@ describe("email code sign-in", () => {
     }
   });
 
+  it("sends the code to, and signs in as, the @fluttersea.com address whichever allowed domain was typed", async () => {
+    const context = await setup();
+    for (const typed of ["Same.Person@sisal.com", "same.person@sisal.it", "same.person@fluttersea.com"]) {
+      await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email: typed }).expect(202);
+      const message = context.emailSender.getMessage("same.person@fluttersea.com");
+      if (!message) throw new Error("The code was not sent to the canonical address");
+      expect(message.to).toBe("same.person@fluttersea.com");
+      // The code is accepted for any spelling of the address, and the account is the canonical one.
+      const login = await verify(context, typed, message.code).expect(200);
+      expect(login.body.user.email).toBe("same.person@fluttersea.com");
+    }
+    const rows = await queryRows(context.db, "SELECT email FROM users WHERE email LIKE 'same.person@%'");
+    expect(rows.map((row) => row.email)).toEqual(["same.person@fluttersea.com"]);
+    expect(context.emailSender.getMessage("same.person@sisal.com")).toBeUndefined();
+  });
+
   it("returns the same code-request response for an existing and a new account", async () => {
     const context = await setup();
-    const existing = await issueCode(context, "existing@sisal.com");
+    const existing = await issueCode(context, "existing@fluttersea.com");
     await verify(context, existing.to, existing.code).expect(200);
     const existingResponse = await context.unauthenticatedApi
       .post("/api/v1/auth/request-code")
@@ -67,17 +86,17 @@ describe("email code sign-in", () => {
       .expect(202);
     const newResponse = await context.unauthenticatedApi
       .post("/api/v1/auth/request-code")
-      .send({ email: "new@sisal.com" })
+      .send({ email: "new@fluttersea.com" })
       .expect(202);
-    expect(existingResponse.body).toEqual(newResponse.body);
+    expect({ ...existingResponse.body, email: undefined }).toEqual({ ...newResponse.body, email: undefined });
   });
 
   it("stores only a keyed code hash and returns the configured 15-minute expiry", async () => {
     const context = await setup();
-    const message = await issueCode(context, "hash@sisal.com");
-    const row = (await queryRows(context.db, "SELECT code_hash, expires_at FROM auth_codes WHERE email = ?", ["hash@sisal.com"]))[0]!;
+    const message = await issueCode(context, "hash@fluttersea.com");
+    const row = (await queryRows(context.db, "SELECT code_hash, expires_at FROM auth_codes WHERE email = ?", ["hash@fluttersea.com"]))[0]!;
     const codeColumns = await queryRows(context.db, "SHOW COLUMNS FROM auth_codes");
-    const issuedAt = (await queryRows(context.db, "SELECT created_at FROM auth_codes WHERE email = ?", ["hash@sisal.com"]))[0]!;
+    const issuedAt = (await queryRows(context.db, "SELECT created_at FROM auth_codes WHERE email = ?", ["hash@fluttersea.com"]))[0]!;
     expect(row.code_hash).not.toContain(message.code);
     expect(row.code_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(codeColumns.map(({ Field }) => Field)).toContain("code_hash");
@@ -88,21 +107,21 @@ describe("email code sign-in", () => {
 
   it("rejects expired and already-used codes", async () => {
     const context = await setup();
-    const expired = await issueCode(context, "expired@sisal.com");
+    const expired = await issueCode(context, "expired@fluttersea.com");
     await context.db.$client.query("UPDATE auth_codes SET expires_at = ? WHERE email = ?", [
       new Date(Date.now() - 1000).toISOString(),
       expired.to,
     ]);
     await verify(context, expired.to, expired.code).expect(401);
 
-    const current = await issueCode(context, "single@sisal.com");
+    const current = await issueCode(context, "single@fluttersea.com");
     await verify(context, current.to, current.code).expect(200);
     await verify(context, current.to, current.code).expect(401);
   });
 
   it("deadens a code after five incorrect attempts", async () => {
     const context = await setup();
-    const message = await issueCode(context, "attempts@sisal.com");
+    const message = await issueCode(context, "attempts@fluttersea.com");
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await verify(context, message.to, message.code === "000000" ? "000001" : "000000").expect(401);
     }
@@ -116,12 +135,12 @@ describe("email code sign-in", () => {
         AUTH_CODE_VERIFY_LIMIT: 2,
       },
     });
-    const email = "limits@sisal.com";
+    const email = "limits@fluttersea.com";
     await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email }).expect(202);
     await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email: email.toUpperCase() }).expect(202);
     await context.unauthenticatedApi.post("/api/v1/auth/request-code").send({ email }).expect(429);
 
-    const other = "verify-limits@sisal.com";
+    const other = "verify-limits@fluttersea.com";
     const message = await issueCode(context, other);
     await verify(context, other, "000000").expect(401);
     await verify(context, other, "000000").expect(401);
@@ -161,7 +180,7 @@ describe("email code sign-in", () => {
 
   it("persists derived profile names and preserves existing names across later sign-ins", async () => {
     const context = await setup();
-    const email = "serkan.taghan@sisal.com";
+    const email = "serkan.taghan@fluttersea.com";
     const firstMessage = await issueCode(context, email);
     const firstLogin = await verify(context, email, firstMessage.code).expect(200);
     expect(firstLogin.body.user).toMatchObject({ email, firstName: "Serkan", lastName: "Taghan" });
@@ -184,7 +203,7 @@ describe("email code sign-in", () => {
 
   it("does not accept client-supplied profile names during verification", async () => {
     const context = await setup();
-    const email = "client.names@sisal.com";
+    const email = "client.names@fluttersea.com";
     const message = await issueCode(context, email);
     await context.unauthenticatedApi
       .post("/api/v1/auth/verify-code")
@@ -196,7 +215,7 @@ describe("email code sign-in", () => {
 
   it("updates only the signed-in user's avatar colour", async () => {
     const context = await setup();
-    const message = await issueCode(context, "avatar.user@sisal.com");
+    const message = await issueCode(context, "avatar.user@fluttersea.com");
     const login = await verify(context, message.to, message.code).expect(200);
     expect(login.body.user.avatarColor).toBe("violet");
     const cookie = cookiePair(setCookieHeader(login));
@@ -211,7 +230,7 @@ describe("email code sign-in", () => {
     const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
     expect(me.body.user.avatarColor).toBe("teal");
 
-    for (const body of [{ avatarColor: "black" }, { avatarColor: "blue", firstName: "Changed" }, { email: "x@sisal.com" }, {}]) {
+    for (const body of [{ avatarColor: "black" }, { avatarColor: "blue", firstName: "Changed" }, { email: "x@fluttersea.com" }, {}]) {
       const rejected = await context.unauthenticatedApi
         .patch("/api/v1/auth/me/profile")
         .set("Cookie", cookie)
@@ -226,7 +245,7 @@ describe("email code sign-in", () => {
   });
 
   describe("profile photo", () => {
-    async function signedIn(context: TestContext, email = "photo.user@sisal.com") {
+    async function signedIn(context: TestContext, email = "photo.user@fluttersea.com") {
       const message = await issueCode(context, email);
       const login = await verify(context, message.to, message.code).expect(200);
       return { cookie: cookiePair(setCookieHeader(login)), user: login.body.user };
@@ -415,7 +434,7 @@ describe("email code sign-in", () => {
     const creatorMessage = await issueCode(context, "creator@fluttersea.com");
     const creatorLogin = await verify(context, creatorMessage.to, creatorMessage.code).expect(200);
     const creatorCookie = cookiePair(setCookieHeader(creatorLogin));
-    const updaterMessage = await issueCode(context, "updater@sisal.it");
+    const updaterMessage = await issueCode(context, "updater@fluttersea.com");
     const updaterLogin = await verify(context, updaterMessage.to, updaterMessage.code).expect(200);
     const updaterCookie = cookiePair(setCookieHeader(updaterLogin));
     await addTeamMembership(context.db, creatorMessage.to, context.teamId);
@@ -503,18 +522,18 @@ describe("email code sign-in", () => {
 
   it("does not register the code-free dev login unless the bypass is on", async () => {
     const context = await setup({ env: { NODE_ENV: "development" } });
-    await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev@sisal.com" }).expect(404);
+    await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev@fluttersea.com" }).expect(404);
   });
 
   it("signs in with an email alone when the development bypass is on", async () => {
     const context = await setup({ env: { NODE_ENV: "development", AUTH_DEV_BYPASS: true } });
-    const response = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "Dev.Person@sisal.com" }).expect(200);
-    expect(response.body.user.email).toBe("dev.person@sisal.com");
+    const response = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "Dev.Person@fluttersea.com" }).expect(200);
+    expect(response.body.user.email).toBe("dev.person@fluttersea.com");
     const cookie = cookiePair(setCookieHeader(response));
     expect(cookie.startsWith("play_next_session_dev=")).toBe(true);
     const me = await context.unauthenticatedApi.get("/api/v1/auth/me").set("Cookie", cookie).expect(200);
-    expect(me.body.user.email).toBe("dev.person@sisal.com");
-    const again = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev.person@sisal.com" }).expect(200);
+    expect(me.body.user.email).toBe("dev.person@fluttersea.com");
+    const again = await context.unauthenticatedApi.post("/api/v1/auth/dev-login").send({ email: "dev.person@fluttersea.com" }).expect(200);
     expect(again.body.user.id).toBe(response.body.user.id);
   });
 
@@ -537,7 +556,7 @@ describe("email code sign-in", () => {
 
     const response = await context.unauthenticatedApi
       .post("/api/v1/auth/request-code")
-      .send({ email: "person@sisal.com" })
+      .send({ email: "person@fluttersea.com" })
       .expect(503);
 
     expect(response.body.error.code).toBe("AUTH_DELIVERY_FAILED");
@@ -577,14 +596,14 @@ describe("email code sign-in", () => {
     let sessionCookie: string;
     let codeInFlight: string;
     try {
-      const signIn = await issueCode(before, "stays@sisal.com");
+      const signIn = await issueCode(before, "stays@fluttersea.com");
       const session = await before.unauthenticatedApi
         .post("/api/v1/auth/verify-code")
         .send({ email: signIn.to, code: signIn.code })
         .expect(200);
       sessionCookie = session.headers["set-cookie"]![0]!.split(";", 1)[0]!;
 
-      const pending = await issueCode(before, "midflight@sisal.com");
+      const pending = await issueCode(before, "midflight@fluttersea.com");
       codeInFlight = pending.code;
     } finally {
       await before.close();
@@ -599,10 +618,10 @@ describe("email code sign-in", () => {
 
     await ctx.unauthenticatedApi
       .post("/api/v1/auth/verify-code")
-      .send({ email: "midflight@sisal.com", code: codeInFlight })
+      .send({ email: "midflight@fluttersea.com", code: codeInFlight })
       .expect(401);
 
-    const reissued = await issueCode(ctx, "midflight@sisal.com");
+    const reissued = await issueCode(ctx, "midflight@fluttersea.com");
     await ctx.unauthenticatedApi
       .post("/api/v1/auth/verify-code")
       .send({ email: reissued.to, code: reissued.code })

@@ -91,11 +91,11 @@ pm.test("uses the captured token", () => pm.expect(pm.response.json().receivedHe
       .toHaveLength(2);
 
     const anotherUser = request.agent(ctx.app);
-    await anotherUser.post("/api/v1/auth/request-code").send({ email: "runner-viewer@sisal.com" }).expect(202);
-    const message = ctx.emailSender.getMessage("runner-viewer@sisal.com");
+    await anotherUser.post("/api/v1/auth/request-code").send({ email: "runner-viewer@fluttersea.com" }).expect(202);
+    const message = ctx.emailSender.getMessage("runner-viewer@fluttersea.com");
     if (!message) throw new Error("Test email sender did not retain the second user's code");
     await anotherUser.post("/api/v1/auth/verify-code").send({ email: message.to, code: message.code }).expect(200);
-    await addTeamMembership(ctx.db, "runner-viewer@sisal.com", ctx.teamId);
+    await addTeamMembership(ctx.db, "runner-viewer@fluttersea.com", ctx.teamId);
     expect((await anotherUser.get(`/api/v1/collections/${collection.id}/runs`).expect(200)).body.total).toBe(0);
     await anotherUser.get(`/api/v1/collections/${collection.id}/runs/${run.id}`).expect(404);
   });

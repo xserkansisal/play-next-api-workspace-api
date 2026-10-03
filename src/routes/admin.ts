@@ -8,6 +8,7 @@ import {
   addTeamMember,
   createTeam,
   deleteTeam,
+  deleteUser,
   listAuditLog,
   listTeamMembers,
   listTeams,
@@ -118,6 +119,12 @@ export function createAdminRouter(db: AppDatabase, options: AdminRouterOptions =
     const { systemRole } = updateUserSchema.parse(req.body);
     const user = await updateUserSystemRole(db, req.params.userId, systemRole, authenticatedUserId(req));
     res.json(withAvatarUrl(req, options.corsOrigin, user));
+  });
+
+  router.delete("/users/:userId", async (req, res) => {
+    const { teamIds } = await deleteUser(db, req.params.userId, authenticatedUserId(req));
+    for (const teamId of teamIds) revokeAccess(teamId, req.params.userId);
+    res.status(204).end();
   });
 
   router.get("/audit-log", async (req, res) => {
