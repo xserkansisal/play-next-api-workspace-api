@@ -3,9 +3,18 @@ import type { ExtractTablesWithRelations } from "drizzle-orm";
 import type { MySql2Transaction } from "drizzle-orm/mysql2";
 import type { AppDatabase } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { items, requestDetails, requestHeaders, requestQueryParams, users } from "../db/schema.js";
+import {
+  collections,
+  items,
+  requestDetails,
+  requestHeaders,
+  requestQueryParams,
+  requestScriptLinks,
+  teamScripts,
+  users,
+} from "../db/schema.js";
 import { first } from "../db/query.js";
-import { ConflictError } from "../errors.js";
+import { BadRequestError, ConflictError } from "../errors.js";
 import type { RequestAuth, RequestItemFields, ScopedAuth, TreeNodeInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId } from "./common.js";
 
@@ -47,6 +56,8 @@ export interface RequestNode extends NodeBase {
   effectiveAuth: ScopedAuth;
   preRequestScript: string;
   postResponseScript: string;
+  preRequestScriptIds: string[];
+  postResponseScriptIds: string[];
 }
 
 export type ItemNode = FolderNode | RequestNode;
@@ -95,6 +106,7 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[], forUpdate: boolean): 
   const details = new Map<string, typeof requestDetails.$inferSelect>();
   const params = new Map<string, KeyValueRow[]>();
   const headers = new Map<string, KeyValueRow[]>();
+  const linkedScripts = new Map<string, Array<{ stage: "pre-request" | "post-response"; scriptId: string }>>();
   const userIds = [...new Set(rows.flatMap((row) => [row.createdBy, row.updatedBy]).filter((id): id is string => id !== null))];
   const userEmails = new Map(
     userIds.length === 0
@@ -125,6 +137,19 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[], forUpdate: boolean): 
         list.push({ key: row.key, value: row.value, description: row.description, enabled: row.enabled });
         target.set(row.requestId, list);
       }
+    }
+    const links = await db.select({
+      requestId: requestScriptLinks.requestId,
+      scriptId: requestScriptLinks.scriptId,
+      stage: requestScriptLinks.stage,
+    })
+      .from(requestScriptLinks)
+      .where(inArray(requestScriptLinks.requestId, chunk))
+      .orderBy(asc(requestScriptLinks.requestId), asc(requestScriptLinks.stage), asc(requestScriptLinks.position));
+    for (const link of links) {
+      const list = linkedScripts.get(link.requestId) ?? [];
+      list.push({ scriptId: link.scriptId, stage: link.stage });
+      linkedScripts.set(link.requestId, list);
     }
   }
 
@@ -158,6 +183,12 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[], forUpdate: boolean): 
         effectiveAuth: { type: "none" },
         preRequestScript: d.preRequestScript,
         postResponseScript: d.postResponseScript,
+        preRequestScriptIds: (linkedScripts.get(row.id) ?? [])
+          .filter((link) => link.stage === "pre-request")
+          .map((link) => link.scriptId),
+        postResponseScriptIds: (linkedScripts.get(row.id) ?? [])
+          .filter((link) => link.stage === "post-response")
+          .map((link) => link.scriptId),
       });
     }
 
@@ -242,6 +273,7 @@ export async function writeRequestDetails(
   fields: RequestItemFields,
   isNew: boolean,
 ): Promise<void> {
+  await writeRequestScriptLinks(db, itemId, fields);
   const values = {
     method: fields.method,
     url: fields.url,
@@ -269,6 +301,58 @@ export async function writeRequestDetails(
     await db
       .insert(requestHeaders)
       .values(fields.headers.map((row, position) => ({ requestId: itemId, position, ...row })));
+  }
+}
+
+export async function writeRequestScriptLinks(
+  db: DbExecutor,
+  itemId: string,
+  fields: Pick<RequestItemFields, "preRequestScriptIds" | "postResponseScriptIds">,
+): Promise<void> {
+  const preRequestScriptIds = fields.preRequestScriptIds ?? [];
+  const postResponseScriptIds = fields.postResponseScriptIds ?? [];
+  const item = await db.select({ teamId: collections.teamId })
+    .from(items)
+    .innerJoin(collections, eq(items.collectionId, collections.id))
+    .where(eq(items.id, itemId))
+    .limit(1);
+  if (!item[0]) throw new Error(`Request item ${itemId} is missing its collection`);
+  await validateRequestScriptReferences(db, item[0].teamId, fields);
+  const links = [
+    ...preRequestScriptIds.map((scriptId, position) => ({ scriptId, stage: "pre-request" as const, position })),
+    ...postResponseScriptIds.map((scriptId, position) => ({ scriptId, stage: "post-response" as const, position })),
+  ];
+  await db.delete(requestScriptLinks).where(eq(requestScriptLinks.requestId, itemId));
+  if (links.length > 0) {
+    await db.insert(requestScriptLinks).values(links.map((link) => ({
+      requestId: itemId,
+      scriptId: link.scriptId,
+      stage: link.stage,
+      position: link.position,
+    })));
+  }
+}
+
+export async function validateRequestScriptReferences(
+  db: DbExecutor,
+  teamId: string,
+  fields: Pick<RequestItemFields, "preRequestScriptIds" | "postResponseScriptIds">,
+): Promise<void> {
+  const links = [
+    ...(fields.preRequestScriptIds ?? []).map((scriptId) => ({ scriptId, stage: "pre-request" as const })),
+    ...(fields.postResponseScriptIds ?? []).map((scriptId) => ({ scriptId, stage: "post-response" as const })),
+  ];
+  if (links.length === 0) return;
+  const scriptIds = links.map((link) => link.scriptId);
+  const owned = await db.select({ id: teamScripts.id, stage: teamScripts.stage })
+    .from(teamScripts)
+    .where(and(eq(teamScripts.teamId, teamId), inArray(teamScripts.id, scriptIds)));
+  const stages = new Map(owned.map((script) => [script.id, script.stage]));
+  if (links.some((link) => stages.get(link.scriptId) !== link.stage)) {
+    throw new BadRequestError(
+      "Every linked script must belong to this team and match its hook stage",
+      "INVALID_SCRIPT_REFERENCE",
+    );
   }
 }
 

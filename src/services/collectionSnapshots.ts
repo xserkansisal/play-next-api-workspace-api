@@ -45,6 +45,8 @@ function snapshotInput(node: CollectionTreeSnapshotNode): TreeNodeInput {
     auth: node.auth,
     preRequestScript: node.preRequestScript,
     postResponseScript: node.postResponseScript,
+    preRequestScriptIds: node.preRequestScriptIds ?? [],
+    postResponseScriptIds: node.postResponseScriptIds ?? [],
   };
   return request;
 }
@@ -82,6 +84,8 @@ function normalizedNode(node: CollectionTreeSnapshotNode): Record<string, unknow
     auth: node.auth,
     preRequestScript: node.preRequestScript,
     postResponseScript: node.postResponseScript,
+    preRequestScriptIds: node.preRequestScriptIds ?? [],
+    postResponseScriptIds: node.postResponseScriptIds ?? [],
   };
 }
 

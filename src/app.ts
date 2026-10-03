@@ -26,6 +26,7 @@ import { createPresenceRouter } from "./routes/presence.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createTeamsRouter } from "./routes/teams.js";
 import { createActivityRouter } from "./routes/activity.js";
+import { createTeamScriptsRouter } from "./routes/teamScripts.js";
 import type { CollectionsRouterOptions } from "./routes/collections.js";
 import { IMPORT_BODY_LIMIT } from "./validation/schemas.js";
 import { OPENAPI_BODY_LIMIT } from "./validation/openapiSchemas.js";
@@ -103,6 +104,7 @@ export function createApp({
   app.use("/api/v1/collections", requireAuth, requireTeam, collectionsEditor, createCollectionsRouter(db, events, collectionsOptions));
   app.use("/api/v1/environments", requireAuth, requireTeam, contentEditor, createEnvironmentsRouter(db, events, env));
   app.use("/api/v1/variables", requireAuth, requireTeam, variablesEditor, createVariablesRouter(db, events));
+  app.use("/api/v1/scripts", requireAuth, requireTeam, contentEditor, createTeamScriptsRouter(db));
   app.use("/api/v1/trash", requireAuth, requireTeam, contentEditor, createTrashRouter(db, events, env));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
   app.use("/api/v1/teams", requireAuth, createTeamsRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));

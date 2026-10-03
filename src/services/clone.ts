@@ -17,7 +17,7 @@
 
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { collections, items, requestDetails, requestHeaders, requestQueryParams } from "../db/schema.js";
+import { collections, items, requestDetails, requestHeaders, requestQueryParams, requestScriptLinks } from "../db/schema.js";
 import { NotFoundError } from "../errors.js";
 import {
   findActiveCollectionByName,
@@ -131,6 +131,14 @@ async function copySubtree(
       if (kvRows.length > 0) {
         await db.insert(table).values(kvRows.map((row) => ({ ...row, requestId: newIds.get(row.requestId)! })));
       }
+    }
+    const scriptLinks = await db.select().from(requestScriptLinks)
+      .where(inArray(requestScriptLinks.requestId, group));
+    if (scriptLinks.length > 0) {
+      await db.insert(requestScriptLinks).values(scriptLinks.map((link) => ({
+        ...link,
+        requestId: newIds.get(link.requestId)!,
+      })));
     }
   }
 

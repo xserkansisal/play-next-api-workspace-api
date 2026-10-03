@@ -478,6 +478,8 @@ export function convertOpenApiSpec(input: CreateOpenApiCollectionInput["spec"]):
         auth,
         preRequestScript: text(operation["x-play-next-pre-request-script"]) ?? "",
         postResponseScript: text(operation["x-play-next-post-response-script"]) ?? "",
+        preRequestScriptIds: [],
+        postResponseScriptIds: [],
       };
       siblings.push(request);
       operations.push({

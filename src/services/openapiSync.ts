@@ -119,6 +119,8 @@ function snapshot(node: RequestNode): RequestItemFields {
     auth: node.auth,
     preRequestScript: node.preRequestScript,
     postResponseScript: node.postResponseScript,
+    preRequestScriptIds: node.preRequestScriptIds,
+    postResponseScriptIds: node.postResponseScriptIds,
   };
 }
 
@@ -286,7 +288,11 @@ async function writeRequestForSync(
       updatedBy: actorId,
     })
     .where(and(eq(items.id, current.id), eq(items.collectionId, current.collectionId), isNull(items.deletedAt)));
-  await writeRequestDetails(db, current.id, fields, false);
+  await writeRequestDetails(db, current.id, {
+    ...fields,
+    preRequestScriptIds: current.preRequestScriptIds,
+    postResponseScriptIds: current.postResponseScriptIds,
+  }, false);
 }
 
 async function moveRequestForSync(

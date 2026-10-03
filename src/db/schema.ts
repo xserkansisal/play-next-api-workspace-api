@@ -76,6 +76,27 @@ export const teamMembers = mysqlTable(
   ],
 );
 
+export const teamScripts = mysqlTable(
+  "team_scripts",
+  {
+    id: id("id").primaryKey(),
+    teamId: id("team_id").notNull().references(() => teams.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    nameKey: varchar("name_key", { length: 400 }).notNull(),
+    description: description("description"),
+    stage: mysqlEnum("stage", ["pre-request", "post-response"]).notNull(),
+    source: mediumtext("source").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    createdBy: id("created_by").references(() => users.id),
+    updatedBy: id("updated_by").references(() => users.id),
+  },
+  (t) => [
+    uniqueIndex("team_scripts_team_stage_name_unique").on(t.teamId, t.stage, t.nameKey),
+    index("team_scripts_team_updated_idx").on(t.teamId, t.updatedAt),
+  ],
+);
+
 export const adminAuditLog = mysqlTable(
   "admin_audit_log",
   {
@@ -231,6 +252,8 @@ export type CollectionTreeSnapshotNode =
       auth: RequestAuth;
       preRequestScript: string;
       postResponseScript: string;
+      preRequestScriptIds: string[];
+      postResponseScriptIds: string[];
     };
 
 export interface CollectionTreeSnapshot {
@@ -319,6 +342,8 @@ export const itemVersions = mysqlTable(
             auth: RequestAuth;
             preRequestScript: string;
             postResponseScript: string;
+            preRequestScriptIds: string[];
+            postResponseScriptIds: string[];
           }
       >()
       .notNull(),
@@ -405,6 +430,21 @@ export const requestDetails = mysqlTable(
       "request_details_body_check",
       sql`(${t.bodyType} IS NULL AND ${t.bodyContent} IS NULL) OR (${t.bodyType} IS NOT NULL AND ${t.bodyContent} IS NOT NULL)`,
     ),
+  ],
+);
+
+export const requestScriptLinks = mysqlTable(
+  "request_script_links",
+  {
+    requestId: id("request_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    scriptId: id("script_id").notNull().references(() => teamScripts.id, { onDelete: "restrict" }),
+    stage: mysqlEnum("stage", ["pre-request", "post-response"]).notNull(),
+    position: int("position").notNull(),
+  },
+  (t) => [
+    primaryKey({ name: "request_script_links_pk", columns: [t.requestId, t.stage, t.position] }),
+    uniqueIndex("request_script_links_script_unique").on(t.requestId, t.scriptId, t.stage),
+    index("request_script_links_script_idx").on(t.scriptId),
   ],
 );
 

@@ -119,6 +119,8 @@ describe("convertOpenApiSpec", () => {
             effectiveAuth: { type: "bearer", token: "request-secret" },
             preRequestScript: "before()",
             postResponseScript: "after()",
+            preRequestScriptIds: [],
+            postResponseScriptIds: [],
           }],
         }],
       };

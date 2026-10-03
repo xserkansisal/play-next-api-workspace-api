@@ -29,6 +29,44 @@ signed-in user per minute. Empty collections/folders complete successfully with 
 
 ## Request scripts
 
+### Shared team script library
+
+Reusable hooks are stored in the selected team and can be managed through:
+
+| Method | Route | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/scripts` | List `{ scripts: [...] }` for the selected team |
+| `POST` | `/api/v1/scripts` | Create a script |
+| `PUT` | `/api/v1/scripts/:scriptId` | Replace a script |
+| `DELETE` | `/api/v1/scripts/:scriptId` | Delete an unused script |
+
+A script has `name`, `description`, `stage` (`pre-request` or `post-response`), and `source`.
+Names are unique within a team and stage. The source has the same 32,768-character limit and
+QuickJS restrictions as per-request hooks. Write routes require the team's `member` role or above;
+scripts in other teams are not visible or addressable. A referenced script's stage cannot be
+changed while a request or saved history refers to it.
+
+Request create/update and collection-tree/import payloads may include ordered reference arrays:
+
+```json
+{
+  "preRequestScriptIds": ["script-uuid-1", "script-uuid-2"],
+  "postResponseScriptIds": ["script-uuid-3"]
+}
+```
+
+Each list accepts at most 50 unique script IDs. The referenced script must belong to the current
+team and have the matching stage; otherwise the request write fails with
+`400 INVALID_SCRIPT_REFERENCE`. Reads return both arrays; omitted arrays default to `[]`, so a
+request `PUT` that omits them removes those links. Linked scripts execute in array order
+before the corresponding legacy `preRequestScript` or `postResponseScript` field. Thus existing
+request hooks remain supported and run after shared hooks. Request changes, collection-tree
+imports, cloning, and snapshot/version restore preserve references. OpenAPI documents are
+portable and therefore do not export team-local script IDs.
+A shared script edit immediately affects every linked request; deleting a script referenced by a
+request or saved item/tree history returns `409 SCRIPT_IN_USE`, preserving version restoration.
+Keep credentials in environment variables rather than hard-coding them in shared script source.
+
 Request create, update, collection-tree, and import payloads accept two optional string fields.
 Reads return both fields; omitted values default to the empty string.
 

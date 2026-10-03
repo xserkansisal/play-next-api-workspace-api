@@ -103,6 +103,10 @@ may repeat). Scoped variables retain one key per user and one global value per k
 | DELETE | `/api/v1/auth/me/avatar` | Remove the profile photo; returns `{ user }` with `avatarUrl: null` |
 | GET | `/api/v1/auth/avatars/:avatarId` | Serve a stored avatar image (signed-in users; URL changes on every upload, so responses are cached as immutable) |
 | POST | `/api/v1/auth/sign-out` | Revoke the current server-side session |
+| GET | `/api/v1/scripts` | List reusable scripts in the selected team |
+| POST | `/api/v1/scripts` | Create a reusable team script |
+| PUT | `/api/v1/scripts/:scriptId` | Replace a reusable team script |
+| DELETE | `/api/v1/scripts/:scriptId` | Delete an unused reusable team script (`409 SCRIPT_IN_USE` if linked or retained in history) |
 | GET | `/api/v1/collections` | Active collections (metadata) |
 | POST | `/api/v1/collections` | Create a collection, optionally with a nested `items` tree (atomic) |
 | GET | `/api/v1/collections/:id` | Collection with its active item tree |
@@ -153,6 +157,8 @@ See [OpenAPI import](docs/frontend-openapi.md) for supported spec formats, mappi
 See [frontend OpenAPI integration](docs/frontend-openapi-client.md) for import/export/sync UI flows and request/response contracts.
 See [frontend collection runner integration](docs/frontend-collection-runner.md) for scripts,
 sequential variable chaining, run results, and history.
+See [frontend reusable script library integration](docs/frontend-script-library.md) for
+team-scoped script management, request references, execution order, and API errors.
 See [frontend team workspaces integration](docs/frontend-teams.md) for the team switcher,
 `X-Team-Id`, team-scoped SSE, error handling and the admin panel API.
 See [frontend activity history integration](docs/frontend-activity-history.md) for the team-scoped

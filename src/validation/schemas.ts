@@ -18,6 +18,7 @@ export const MAX_IMPORT_NODES = 2_000;
 export const IMPORT_BODY_LIMIT = "10mb";
 
 export const idSchema = z.uuid();
+const requestScriptIdsSchema = z.array(idSchema).max(50).refine((ids) => new Set(ids).size === ids.length);
 
 export const nameSchema = z
   .string()
@@ -94,6 +95,8 @@ const requestFields = {
   auth: authSchema,
   preRequestScript: requestScriptSchema,
   postResponseScript: requestScriptSchema,
+  preRequestScriptIds: requestScriptIdsSchema.default([]),
+  postResponseScriptIds: requestScriptIdsSchema.default([]),
 };
 
 const folderFields = {
@@ -243,6 +246,14 @@ export const environmentVariableSchema = z.strictObject({
   enabled: z.boolean().default(true),
   isSecret: z.boolean().default(false),
 });
+
+export const teamScriptSchema = z.strictObject({
+  name: nameSchema,
+  description: descriptionSchema,
+  stage: z.enum(["pre-request", "post-response"]),
+  source: z.string().max(MAX_SCRIPT_LENGTH),
+});
+export type TeamScriptInput = z.output<typeof teamScriptSchema>;
 
 // Scoped variables reuse the environment key rules: both are referenced as {{key}}, so a key that
 // breaks that reference is just as unusable here. Values are larger than a row's text because a

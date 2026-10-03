@@ -27,7 +27,13 @@ import {
 import { requireActiveCollection } from "./collections.js";
 import { nameKey, newId, nowIso } from "./common.js";
 import { copyName } from "./copyName.js";
-import { authConfigForStorage, findActiveItem, type DbExecutor } from "./tree.js";
+import {
+  authConfigForStorage,
+  findActiveItem,
+  type DbExecutor,
+  validateRequestScriptReferences,
+  writeRequestScriptLinks,
+} from "./tree.js";
 import { recordActivity } from "./activity.js";
 import { recordTreeSnapshot } from "./versions.js";
 
@@ -208,6 +214,7 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
       })),
     );
   }
+  for (const { id, node } of requests) await writeRequestScriptLinks(db, id, node);
   for (const [table, field] of [
     [requestQueryParams, "queryParams"],
     [requestHeaders, "headers"],
@@ -286,6 +293,13 @@ export function importItems(db: AppDatabase, collectionId: string, input: Import
 
     const rows: FlatRow[] = [];
     flatten(input.items, parentId, rootNames, rows);
+    if (input.dryRun) {
+      for (const row of rows) {
+        if (row.node.type === "request") {
+          await validateRequestScriptReferences(tx, collection.teamId, row.node);
+        }
+      }
+    }
     const created = {
       folders: rows.filter((row) => row.node.type === "folder").length,
       requests: rows.filter((row) => row.node.type === "request").length,

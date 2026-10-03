@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   environments,
@@ -7,6 +7,7 @@ import {
   openapiSyncs,
   testRunResults,
   testRuns,
+  teamScripts,
   variables,
 } from "../db/schema.js";
 import { BadRequestError, HttpError, NotFoundError } from "../errors.js";
@@ -89,6 +90,8 @@ async function loadRunContracts(
   }
   return { document: sync.sourceSpec, operationByItemId };
 }
+
+type SharedScript = { stage: "pre-request" | "post-response"; source: string };
 
 export interface RunResultSummary {
   id: string;
@@ -329,6 +332,7 @@ async function runOneRequest(
   secretValues: string[],
   contract: OpenApiOperationContract | undefined,
   validateContract: ReturnType<typeof createOpenApiContractValidator> | undefined,
+  sharedScripts: Map<string, SharedScript>,
 ): Promise<{
   status: ResultStatus;
   durationMs: number;
@@ -344,14 +348,24 @@ async function runOneRequest(
   let assertions: AssertionResult[] = [];
   try {
     let scriptRequest = toScriptRequest(request);
-    if (request.preRequestScript !== "") {
-      const preRequest = await executeTestScript(
-        request.preRequestScript,
-        { request: scriptRequest, variables: variableRecord(variables) },
-      );
-      scriptRequest = preRequest.request;
+    const runHook = async (source: string, response?: ProxyResult) => {
+      const result = await executeTestScript(source, {
+        request: scriptRequest,
+        variables: variableRecord(variables),
+        ...(response ? { response: scriptResponseForResult(response) } : {}),
+      });
+      scriptRequest = result.request;
       variables.clear();
-      for (const [key, value] of Object.entries(preRequest.variables)) variables.set(key, value);
+      for (const [key, value] of Object.entries(result.variables)) variables.set(key, value);
+      return result.tests;
+    };
+    for (const scriptId of request.preRequestScriptIds) {
+      const script = sharedScripts.get(scriptId);
+      if (!script || script.stage !== "pre-request") throw new TestScriptError("SCRIPT_FAILED");
+      await runHook(script.source);
+    }
+    if (request.preRequestScript !== "") {
+      await runHook(request.preRequestScript);
     }
 
     const prepared = prepareProxyRequest(request, scriptRequest, variables);
@@ -359,18 +373,13 @@ async function runOneRequest(
     response = await executeProxyRequest(prepared, { ...proxyOptions, timeoutMs });
     if (contract && validateContract) assertions.push(...validateContract(contract, response));
 
+    for (const scriptId of request.postResponseScriptIds) {
+      const script = sharedScripts.get(scriptId);
+      if (!script || script.stage !== "post-response") throw new TestScriptError("SCRIPT_FAILED");
+      assertions.push(...await runHook(script.source, response));
+    }
     if (request.postResponseScript !== "") {
-      const postResponse = await executeTestScript(
-        request.postResponseScript,
-        {
-          request: scriptRequest,
-          variables: variableRecord(variables),
-          response: scriptResponseForResult(response),
-        },
-      );
-      assertions.push(...postResponse.tests);
-      variables.clear();
-      for (const [key, value] of Object.entries(postResponse.variables)) variables.set(key, value);
+      assertions.push(...await runHook(request.postResponseScript, response));
     }
     const status: ResultStatus = assertions.some((assertion) => !assertion.passed) ? "failed" : "passed";
     const preview = truncateUtf8(maskSecretValues(response.bodyText, secretValues), RESPONSE_PREVIEW_LENGTH);
@@ -442,6 +451,22 @@ export async function runCollection(
     previousEncryptionKey,
   );
   const loadedContracts = await loadRunContracts(db, collectionId);
+  const sharedScriptIds = [...new Set(requests.flatMap((request) => [
+    ...request.preRequestScriptIds,
+    ...request.postResponseScriptIds,
+  ]))];
+  const sharedScripts = new Map<string, SharedScript>();
+  if (sharedScriptIds.length > 0) {
+    const scripts = await db.select({
+      id: teamScripts.id,
+      stage: teamScripts.stage,
+      source: teamScripts.source,
+    }).from(teamScripts).where(and(
+      eq(teamScripts.teamId, teamId),
+      inArray(teamScripts.id, sharedScriptIds),
+    ));
+    for (const script of scripts) sharedScripts.set(script.id, script);
+  }
   const validateContract = loadedContracts.document
     ? createOpenApiContractValidator(loadedContracts.document)
     : undefined;
@@ -484,6 +509,7 @@ export async function runCollection(
             loadedVariables.secretValues,
             loadedContracts.operationByItemId.get(request.id),
             validateContract,
+            sharedScripts,
           );
       if (result.status === "passed") passedCount += 1;
       else failedCount += 1;

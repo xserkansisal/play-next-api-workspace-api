@@ -7,6 +7,7 @@ import {
   requestItemFieldsSchema,
   restoreSchema,
   runHistoryQuerySchema,
+  teamScriptSchema,
   variableDisplayOrderSchema,
   variableOrderPreferencesSchema,
 } from "../../src/validation/schemas.js";
@@ -28,6 +29,8 @@ describe("validation schemas", () => {
       auth: { type: "inherit" },
       preRequestScript: "",
       postResponseScript: "",
+      preRequestScriptIds: [],
+      postResponseScriptIds: [],
     });
   });
 
@@ -37,6 +40,23 @@ describe("validation schemas", () => {
       items: [{ type: "folder", name: "A", items: [{ type: "folder", name: "B" }] }],
     });
     expect(parsed.items[0]).toMatchObject({ type: "folder", items: [{ type: "folder", name: "B", items: [] }] });
+  });
+
+  it("validates ordered shared script references", () => {
+    const scriptId = "00000000-0000-4000-8000-000000000001";
+    const base = { type: "request", name: "R", method: "GET", url: "/x" };
+    expect(createItemSchema.safeParse({ ...base, preRequestScriptIds: [scriptId] }).success).toBe(true);
+    expect(createItemSchema.safeParse({ ...base, preRequestScriptIds: [scriptId, scriptId] }).success).toBe(false);
+    expect(createItemSchema.safeParse({ ...base, preRequestScriptIds: ["not-a-uuid"] }).success).toBe(false);
+  });
+
+  it("validates reusable team script definitions", () => {
+    expect(teamScriptSchema.parse({
+      name: "Auth helper",
+      stage: "pre-request",
+      source: "pm.environment.set('token', 'value');",
+    })).toMatchObject({ description: "", stage: "pre-request" });
+    expect(teamScriptSchema.safeParse({ name: "Test", stage: "request", source: "" }).success).toBe(false);
   });
 
   it("accepts each supported request body type and preserves its content", () => {

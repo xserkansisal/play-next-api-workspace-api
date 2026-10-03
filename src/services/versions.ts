@@ -60,6 +60,8 @@ function treeSnapshotNode(node: ItemNode): CollectionTreeSnapshotNode {
     auth: node.auth,
     preRequestScript: node.preRequestScript,
     postResponseScript: node.postResponseScript,
+    preRequestScriptIds: node.preRequestScriptIds,
+    postResponseScriptIds: node.postResponseScriptIds,
   };
 }
 
@@ -137,6 +139,8 @@ function itemSnapshot(item: ItemNode): ItemVersionSnapshot {
     auth: item.auth,
     preRequestScript: item.preRequestScript,
     postResponseScript: item.postResponseScript,
+    preRequestScriptIds: item.preRequestScriptIds,
+    postResponseScriptIds: item.postResponseScriptIds,
   };
 }
 
