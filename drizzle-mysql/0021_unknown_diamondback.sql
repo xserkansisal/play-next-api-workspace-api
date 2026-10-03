@@ -1,0 +1,1 @@
+ALTER TABLE `openapi_sync_items` ADD `source_folder_path` json;

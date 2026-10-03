@@ -102,6 +102,7 @@ Every request to the following routes **must** carry the header `X-Team-Id: <tea
 | `/api/v1/variables/**` | yes |
 | `/api/v1/trash/**` | yes |
 | `/api/v1/presence` | yes |
+| `/api/v1/activity` | yes |
 | `/api/v1/events` | yes (use `?teamId=`; see section 6) |
 | `/api/v1/auth/**`, `/api/v1/teams`, `/api/v1/preferences/**`, `/api/v1/proxy/**`, `/api/v1/admin/**` | no |
 
@@ -306,3 +307,8 @@ Notes:
 - [ ] Rename "Global" variables to a team-wide label.
 - [ ] Treat `404` (not `ITEM_NOT_FOUND` specifically) as "item missing".
 - [ ] Admin panel: teams, members, users, audit log.
+
+The workspace also has a separate, team-member-readable content activity timeline at
+`GET /api/v1/activity`; it is not part of the system-admin-only audit log above. See
+[frontend activity history integration](frontend-activity-history.md) for its contract and privacy
+rules.

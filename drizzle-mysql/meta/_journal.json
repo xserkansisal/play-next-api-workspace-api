@@ -141,6 +141,27 @@
       "when": 1790957412829,
       "tag": "0019_restore_team_owners",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1791006121713,
+      "tag": "0020_ancient_living_tribunal",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1791006566692,
+      "tag": "0021_unknown_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1791008592799,
+      "tag": "0022_dashing_tigra",
+      "breakpoints": true
     }
   ]
 }

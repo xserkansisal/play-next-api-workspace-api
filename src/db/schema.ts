@@ -15,7 +15,7 @@ import {
   varchar,
   text,
 } from "drizzle-orm/mysql-core";
-import type { RequestAuth, ScopedAuth } from "../validation/schemas.js";
+import type { RequestAuth, RequestItemFields, ScopedAuth } from "../validation/schemas.js";
 
 // Keep text comparisons byte-exact by creating the database with utf8mb4_0900_bin.
 // Timestamps remain ISO-8601 UTC strings so the API's ordering/comparison semantics do not change.
@@ -91,6 +91,28 @@ export const adminAuditLog = mysqlTable(
   (t) => [
     index("admin_audit_log_created_idx").on(t.createdAt),
     index("admin_audit_log_team_created_idx").on(t.teamId, t.createdAt),
+  ],
+);
+
+export const teamActivityLog = mysqlTable(
+  "team_activity_log",
+  {
+    id: id("id").primaryKey(),
+    teamId: id("team_id").notNull(),
+    // Snapshots keep attribution useful even after the actor or resource is removed.
+    actorId: id("actor_id"),
+    actorEmail: varchar("actor_email", { length: 320 }).notNull(),
+    action: varchar("action", { length: 64 }).notNull(),
+    resourceType: mysqlEnum("resource_type", ["collection", "folder", "request", "environment", "variable"]).notNull(),
+    resourceId: id("resource_id").notNull(),
+    resourceName: varchar("resource_name", { length: 256 }).notNull(),
+    collectionId: id("collection_id"),
+    details: json("details").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (t) => [
+    index("team_activity_log_team_created_idx").on(t.teamId, t.createdAt, t.id),
+    index("team_activity_log_team_resource_idx").on(t.teamId, t.resourceType, t.resourceId, t.createdAt),
   ],
 );
 
@@ -257,6 +279,40 @@ export const itemVersions = mysqlTable(
     createdBy: id("created_by").references(() => users.id),
   },
   (t) => [index("item_versions_item_created_idx").on(t.itemId, t.createdAt)],
+);
+
+export const openapiSyncs = mysqlTable("openapi_syncs", {
+  collectionId: id("collection_id")
+    .primaryKey()
+    .references(() => collections.id),
+  specHash: varchar("spec_hash", { length: 64 }).notNull(),
+  specTitle: varchar("spec_title", { length: 200 }).notNull(),
+  specVersion: varchar("spec_version", { length: 100 }).notNull(),
+  syncedAt: timestamp("synced_at").notNull(),
+  updatedBy: id("updated_by").references(() => users.id),
+});
+
+export const openapiSyncItems = mysqlTable(
+  "openapi_sync_items",
+  {
+    itemId: id("item_id")
+      .primaryKey()
+      .references(() => items.id, { onDelete: "cascade" }),
+    collectionId: id("collection_id")
+      .notNull()
+      .references(() => openapiSyncs.collectionId, { onDelete: "cascade" }),
+    identityHash: varchar("identity_hash", { length: 64 }).notNull(),
+    operationId: varchar("operation_id", { length: 500 }),
+    method: mysqlEnum("method", ["GET", "POST", "PUT", "PATCH", "DELETE"]).notNull(),
+    path: varchar("path", { length: 8192 }).notNull(),
+    sourceFolderPath: json("source_folder_path").$type<string[] | null>(),
+    sourceSnapshot: json("source_snapshot").$type<RequestItemFields>().notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("openapi_sync_items_identity_unique").on(t.collectionId, t.identityHash),
+    index("openapi_sync_items_collection_idx").on(t.collectionId),
+  ],
 );
 
 export const presenceTestUsers = mysqlTable(

@@ -31,6 +31,7 @@ export function createCorsMiddleware(allowedOrigin?: string): RequestHandler {
     res.setHeader("Access-Control-Allow-Origin", anyOrigin ? origin : allowedOrigin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID, X-Dev-Inbox-Token, X-Team-Id");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
     res.setHeader("Access-Control-Allow-Credentials", "true");
 
     if (req.method === "OPTIONS") {

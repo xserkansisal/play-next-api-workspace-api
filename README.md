@@ -109,6 +109,11 @@ may repeat). Scoped variables retain one key per user and one global value per k
 | DELETE | `/api/v1/collections/:id` | Move collection and its items to Trash |
 | POST | `/api/v1/collections/:id/clone` | Copy the collection and its whole active tree under a free name |
 | POST | `/api/v1/collections/:id/import` | Bulk-import a tree of folders and requests at the root or beneath a folder |
+| POST | `/api/v1/collections/openapi` | Create a collection from an OpenAPI 3.0/3.1 JSON or YAML spec |
+| POST | `/api/v1/collections/:id/import/openapi` | Import an OpenAPI 3.0/3.1 spec into a collection or folder |
+| GET | `/api/v1/collections/:id/export/openapi` | Download a collection as OpenAPI 3.0 or 3.1 JSON/YAML |
+| POST | `/api/v1/collections/:id/sync/openapi/preview` | Preview OpenAPI source changes against a collection |
+| POST | `/api/v1/collections/:id/sync/openapi/apply` | Apply selected OpenAPI changes and track the source |
 | POST | `/api/v1/collections/:id/items` | Create a `folder` or `request` (optional `parentId`) |
 | GET | `/api/v1/collections/:id/items/:itemId` | Read one item (folders include their subtree) |
 | PUT | `/api/v1/collections/:id/items/:itemId` | Save one item's own fields; never rewrites the tree |
@@ -137,10 +142,14 @@ See [frontend authentication integration](docs/frontend-authentication.md) for B
 Key, and collection/folder inheritance behavior.
 See [frontend version history integration](docs/frontend-version-history.md) for history and restore
 response formats and behavior.
+See [OpenAPI import](docs/frontend-openapi.md) for supported spec formats, mapping, warnings, and limitations.
+See [frontend OpenAPI integration](docs/frontend-openapi-client.md) for import/export/sync UI flows and request/response contracts.
 See [frontend collection runner integration](docs/frontend-collection-runner.md) for scripts,
 sequential variable chaining, run results, and history.
 See [frontend team workspaces integration](docs/frontend-teams.md) for the team switcher,
 `X-Team-Id`, team-scoped SSE, error handling and the admin panel API.
+See [frontend activity history integration](docs/frontend-activity-history.md) for the team-scoped
+content activity API, pagination, event types, privacy behavior, and frontend rendering guidance.
 | GET | `/api/v1/preferences/variable-order` | Read this user's variable ordering preference (`null` when not saved) |
 | PUT | `/api/v1/preferences/variable-order` | Save this user's variable ordering preference (maximum request size: 256 KB) |
 | PUT | `/api/v1/presence` | Refresh or clear the current browser tab's collection/folder/request location |
@@ -148,6 +157,7 @@ See [frontend team workspaces integration](docs/frontend-teams.md) for the team 
 | POST | `/api/v1/trash/:id/restore/check` | Read-only conflict report; accepts the same body as restore |
 | POST | `/api/v1/trash/:id/restore` | Atomic subtree restore. Body: `{ "collectionName"?: string, "nameOverrides"?: { [itemId or environmentId]: newName } }` |
 | GET | `/api/v1/events` | Server-Sent Events stream of value-free change notifications and live presence snapshots |
+| GET | `/api/v1/activity` | Read the selected team's durable content activity history (`?limit=&cursor=`) |
 
 There is no permanent delete. Conflicts return `409` (`COLLECTION_NAME_CONFLICT`,
 `FOLDER_NAME_CONFLICT`, `ENVIRONMENT_NAME_CONFLICT`, `RESTORE_CONFLICT`, `RESTORE_BLOCKED`); invalid input returns `400`

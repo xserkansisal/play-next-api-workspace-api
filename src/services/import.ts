@@ -28,6 +28,7 @@ import { requireActiveCollection } from "./collections.js";
 import { nameKey, newId, nowIso } from "./common.js";
 import { copyName } from "./copyName.js";
 import { authConfigForStorage, findActiveItem, type DbExecutor } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 export interface ImportRenamed {
   path: string[];
@@ -224,7 +225,7 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
  */
 export function importItems(db: AppDatabase, collectionId: string, input: ImportItemsInput, actorId: string): Promise<ImportResult> {
   return db.transaction(async (tx) => {
-    await requireActiveCollection(tx, collectionId);
+    const collection = await requireActiveCollection(tx, collectionId);
     const { parentId } = input;
 
     // Held until commit so a concurrent trash or move of the target waits for the import rather
@@ -294,6 +295,16 @@ export function importItems(db: AppDatabase, collectionId: string, input: Import
     if (input.dryRun) return { ...base, roots: [] };
 
     await writeRows(tx, collectionId, rows, timestamp, actorId);
+    await recordActivity(tx, {
+      teamId: collection.teamId,
+      actorId,
+      action: "collection.imported",
+      resourceType: "collection",
+      resourceId: collectionId,
+      resourceName: collection.name,
+      details: { parentId, folders: created.folders, requests: created.requests, renamedFolders: renamed.length },
+      createdAt: timestamp,
+    });
     const roots = rows.filter((row) => row.parentId === parentId).map((row) => ({ id: row.id, kind: row.node.type }));
     return { ...base, roots };
   });

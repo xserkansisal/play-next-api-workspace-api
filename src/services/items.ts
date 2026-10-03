@@ -16,6 +16,7 @@ import {
   type ItemNode,
 } from "./tree.js";
 import { findItemVersion, listItemVersions, recordItemVersion } from "./versions.js";
+import { recordActivity } from "./activity.js";
 
 export async function readItem(db: DbExecutor, collectionId: string, itemId: string): Promise<ItemNode> {
   await requireActiveCollection(db, collectionId);
@@ -39,7 +40,7 @@ export function restoreItemVersion(
 ): Promise<ItemNode> {
   return db.transaction(async (tx) => {
     const row = await lockActiveItem(tx, collectionId, itemId);
-    await requireActiveCollection(tx, collectionId);
+    const collection = await requireActiveCollection(tx, collectionId);
     const current = await readItem(tx, collectionId, itemId);
     const version = await findItemVersion(tx, itemId, versionId);
     const snapshot = version.snapshot;
@@ -63,6 +64,16 @@ export function restoreItemVersion(
       })
       .where(eq(items.id, itemId));
     if (snapshot.type === "request") await writeRequestDetails(tx, itemId, snapshot, false);
+    await recordActivity(tx, {
+      teamId: collection.teamId,
+      actorId,
+      action: "item.version_restored",
+      resourceType: row.kind,
+      resourceId: itemId,
+      resourceName: snapshot.name,
+      collectionId,
+      details: { changedFields: snapshot.type === "folder" ? ["name", "description", "auth"] : ["name", "description", "method", "url", "queryParams", "headers", "body", "auth", "preRequestScript", "postResponseScript"] },
+    });
     return readItem(tx, collectionId, itemId);
   });
 }
@@ -86,7 +97,7 @@ async function lockActiveItem(db: DbExecutor, collectionId: string, itemId: stri
 
 export function createItem(db: AppDatabase, collectionId: string, input: CreateItemInput, actorId: string): Promise<ItemNode> {
   return db.transaction(async (tx) => {
-      await requireActiveCollection(tx, collectionId);
+      const collection = await requireActiveCollection(tx, collectionId);
       if (input.parentId !== null) {
         const parent = await findActiveItem(tx, collectionId, input.parentId);
         if (!parent || parent.kind !== "folder") {
@@ -121,6 +132,15 @@ export function createItem(db: AppDatabase, collectionId: string, input: CreateI
         })
         ;
       if (input.type === "request") await writeRequestDetails(tx, id, input, true);
+      await recordActivity(tx, {
+        teamId: collection.teamId,
+        actorId,
+        action: "item.created",
+        resourceType: input.type,
+        resourceId: id,
+        resourceName: input.name,
+        collectionId,
+      });
       return readItem(tx, collectionId, id);
     });
 }
@@ -135,7 +155,7 @@ export function updateItem(
 ): Promise<ItemNode> {
   return db.transaction(async (tx) => {
       const row = await lockActiveItem(tx, collectionId, itemId);
-      await requireActiveCollection(tx, collectionId);
+      const collection = await requireActiveCollection(tx, collectionId);
       if (row.kind !== input.type) {
         throw new BadRequestError(`Item ${itemId} is a ${row.kind}, not a ${input.type}`, "ITEM_TYPE_MISMATCH", {
           expected: row.kind,
@@ -147,7 +167,18 @@ export function updateItem(
         if (existing) throw folderConflictError(input.name, row.parentId, existing.id);
       }
 
-      await recordItemVersion(tx, await readItem(tx, collectionId, itemId), actorId);
+      const current = await readItem(tx, collectionId, itemId);
+      await recordItemVersion(tx, current, actorId);
+      const changedFields = input.type === "folder" && current.type === "folder"
+        ? [
+            ...(current.name !== input.name ? ["name"] : []),
+            ...(current.description !== input.description ? ["description"] : []),
+            ...(input.auth !== undefined && JSON.stringify(current.auth) !== JSON.stringify(input.auth) ? ["auth"] : []),
+          ]
+        : input.type === "request" && current.type === "request"
+          ? (["name", "description", "method", "url", "queryParams", "headers", "body", "auth", "preRequestScript", "postResponseScript"] as const)
+              .filter((field) => JSON.stringify(current[field]) !== JSON.stringify(input[field]))
+          : (() => { throw new Error(`Item ${itemId} changed type while locked`); })();
       await tx.update(items)
         .set({
           name: input.name,
@@ -160,6 +191,16 @@ export function updateItem(
         .where(eq(items.id, itemId))
         ;
       if (input.type === "request") await writeRequestDetails(tx, itemId, input, false);
+      await recordActivity(tx, {
+        teamId: collection.teamId,
+        actorId,
+        action: "item.updated",
+        resourceType: row.kind,
+        resourceId: itemId,
+        resourceName: input.name,
+        collectionId,
+        details: { changedFields },
+      });
       return readItem(tx, collectionId, itemId);
     });
 }
@@ -174,7 +215,7 @@ export interface TrashedItem {
 
 export function trashItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): Promise<TrashedItem> {
   return db.transaction(async (tx) => {
-      await requireActiveCollection(tx, collectionId);
+      const collection = await requireActiveCollection(tx, collectionId);
       const row = await requireActiveItem(tx, collectionId, itemId);
       const ids = await activeSubtreeIds(tx, itemId);
       const timestamp = nowIso();
@@ -184,6 +225,17 @@ export function trashItem(db: AppDatabase, collectionId: string, itemId: string,
           .where(inArray(items.id, ids.slice(i, i + 500)))
           ;
       }
+      await recordActivity(tx, {
+        teamId: collection.teamId,
+        actorId,
+        action: "item.trashed",
+        resourceType: row.kind,
+        resourceId: itemId,
+        resourceName: row.name,
+        collectionId,
+        details: { subtreeItemCount: ids.length },
+        createdAt: timestamp,
+      });
       return { id: itemId, collectionId, kind: row.kind, deletedAt: timestamp };
     });
 }

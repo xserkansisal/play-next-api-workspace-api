@@ -25,6 +25,7 @@ describe("API app", () => {
         .set("Origin", "http://localhost:5173")
         .expect(200);
       expect(api.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+      expect(api.headers["access-control-expose-headers"]).toContain("Content-Disposition");
 
       const preflight = await cors.api
         .options("/api/v1/events")
@@ -55,6 +56,7 @@ describe("API app", () => {
         // wildcard, and this API authenticates with a session cookie.
         expect(api.headers["access-control-allow-origin"]).toBe(origin);
         expect(api.headers["access-control-allow-credentials"]).toBe("true");
+        expect(api.headers["access-control-expose-headers"]).toContain("Content-Disposition");
         // Without this a cache could hand one origin's allowance to another.
         expect(api.headers.vary).toContain("Origin");
       }

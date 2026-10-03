@@ -1,0 +1,1864 @@
+{
+  "onConflict": "rename",
+  "items": [
+    {
+      "type": "folder",
+      "name": "Admin",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Audit Log",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/admin/audit-log",
+              "description": "List the system audit log",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/admin/audit-log",
+              "queryParams": [
+                {
+                  "key": "teamId",
+                  "value": "",
+                  "description": "",
+                  "enabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "enabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "enabled": false
+                }
+              ],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Teams",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Archive",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/admin/teams/:teamId/archive",
+                  "description": "Archive a team",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/archive",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Members",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "DELETE /api/v1/admin/teams/:teamId/members/:userId",
+                  "description": "Remove a team member",
+                  "method": "DELETE",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/members/{{userId}}",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                },
+                {
+                  "type": "request",
+                  "name": "GET /api/v1/admin/teams/:teamId/members",
+                  "description": "List members of any team",
+                  "method": "GET",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/members",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                },
+                {
+                  "type": "request",
+                  "name": "PATCH /api/v1/admin/teams/:teamId/members/:userId",
+                  "description": "Update a team member role",
+                  "method": "PATCH",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/members/{{userId}}",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{\n  \"role\": \"member\"\n}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                },
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/admin/teams/:teamId/members",
+                  "description": "Add a member to any team",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/members",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{\n  \"email\": \"\",\n  \"role\": \"member\"\n}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Unarchive",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/admin/teams/:teamId/unarchive",
+                  "description": "Unarchive a team",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}/unarchive",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "DELETE /api/v1/admin/teams/:teamId",
+              "description": "Delete a team",
+              "method": "DELETE",
+              "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/admin/teams",
+              "description": "List teams",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/admin/teams",
+              "queryParams": [
+                {
+                  "key": "includeArchived",
+                  "value": "false",
+                  "description": "",
+                  "enabled": false
+                }
+              ],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/admin/teams/:teamId",
+              "description": "Read team details",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PATCH /api/v1/admin/teams/:teamId",
+              "description": "Update team metadata",
+              "method": "PATCH",
+              "url": "{{baseUrl}}/api/v1/admin/teams/{{teamId}}",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/admin/teams",
+              "description": "Create a team",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/admin/teams",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Users",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "DELETE /api/v1/admin/users/:userId",
+              "description": "Delete a user",
+              "method": "DELETE",
+              "url": "{{baseUrl}}/api/v1/admin/users/{{userId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/admin/users",
+              "description": "Search and paginate users",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/admin/users",
+              "queryParams": [
+                {
+                  "key": "query",
+                  "value": "",
+                  "description": "",
+                  "enabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "enabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "enabled": false
+                }
+              ],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/admin/users/:userId",
+              "description": "Read a user",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/admin/users/{{userId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PATCH /api/v1/admin/users/:userId",
+              "description": "Set a user system role",
+              "method": "PATCH",
+              "url": "{{baseUrl}}/api/v1/admin/users/{{userId}}",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"systemRole\": \"user\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Auth",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Avatars",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/auth/avatars/:avatarId",
+              "description": "Serve a stored avatar image",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/auth/avatars/{{avatarId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Dev Inbox",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/auth/dev-inbox",
+              "description": "Development-only read of a current sign-in code",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/auth/dev-inbox",
+              "queryParams": [
+                {
+                  "key": "email",
+                  "value": "",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "headers": [
+                {
+                  "key": "X-Dev-Inbox-Token",
+                  "value": "{{devInboxToken}}",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Dev Login",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/auth/dev-login",
+              "description": "Development-only sign-in without a code",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/auth/dev-login",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"email\": \"\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Me",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Avatar",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "DELETE /api/v1/auth/me/avatar",
+                  "description": "Remove the profile photo",
+                  "method": "DELETE",
+                  "url": "{{baseUrl}}/api/v1/auth/me/avatar",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                },
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/auth/me/avatar",
+                  "description": "Upload a profile photo - Multipart upload: one image file in field avatar (JPEG, PNG, WebP; up to 5 MB)",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/auth/me/avatar",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Profile",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "PATCH /api/v1/auth/me/profile",
+                  "description": "Set the signed-in user avatar color",
+                  "method": "PATCH",
+                  "url": "{{baseUrl}}/api/v1/auth/me/profile",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{\n  \"avatarColor\": \"blue\"\n}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/auth/me",
+              "description": "Read the signed-in user profile",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/auth/me",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Request Code",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/auth/request-code",
+              "description": "Request a sign-in code by email",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/auth/request-code",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"email\": \"\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Sign Out",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/auth/sign-out",
+              "description": "Revoke the current session",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/auth/sign-out",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Verify Code",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/auth/verify-code",
+              "description": "Verify a sign-in code and issue a session cookie",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/auth/verify-code",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"email\": \"\",\n  \"code\": \"000000\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Collections",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Clone",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/clone",
+              "description": "Copy a collection under a free name",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/clone",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Export",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Openapi",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "GET /api/v1/collections/:collectionId/export/openapi",
+                  "description": "Download a collection as OpenAPI JSON or YAML",
+                  "method": "GET",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/export/openapi",
+                  "queryParams": [
+                    {
+                      "key": "version",
+                      "value": "3.1",
+                      "description": "",
+                      "enabled": false
+                    },
+                    {
+                      "key": "format",
+                      "value": "json",
+                      "description": "",
+                      "enabled": false
+                    }
+                  ],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Import",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Openapi",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/collections/:collectionId/import/openapi",
+                  "description": "Import an OpenAPI spec into a collection or folder",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/import/openapi",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{\n  \"spec\": {\n    \"openapi\": \"3.1.0\",\n    \"info\": {\n      \"title\": \"Example API\",\n      \"version\": \"1.0.0\"\n    },\n    \"paths\": {\n      \"/health\": {\n        \"get\": {}\n      }\n    }\n  },\n  \"parentId\": null,\n  \"onConflict\": \"rename\",\n  \"dryRun\": false\n}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/import",
+              "description": "Bulk-import a tree of folders and requests",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/import",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"parentId\": null,\n  \"onConflict\": \"rename\",\n  \"dryRun\": false,\n  \"items\": []\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Items",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Clone",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/collections/:collectionId/items/:itemId/clone",
+                  "description": "Copy a folder or request beside the original",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/clone",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Move",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/collections/:collectionId/items/:itemId/move",
+                  "description": "Reparent an item within or across collections",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/move",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{\n  \"targetCollectionId\": \"00000000-0000-4000-8000-000000000000\",\n  \"parentId\": null\n}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Run",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/collections/:collectionId/items/:itemId/run",
+                  "description": "Run requests beneath one folder",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/run",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "folder",
+              "name": "Versions",
+              "description": "",
+              "items": [
+                {
+                  "type": "folder",
+                  "name": "Restore",
+                  "description": "",
+                  "items": [
+                    {
+                      "type": "request",
+                      "name": "POST /api/v1/collections/:collectionId/items/:itemId/versions/:versionId/restore",
+                      "description": "Restore an item version",
+                      "method": "POST",
+                      "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/versions/{{versionId}}/restore",
+                      "queryParams": [],
+                      "headers": [],
+                      "body": null,
+                      "auth": {
+                        "type": "none"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "request",
+                  "name": "GET /api/v1/collections/:collectionId/items/:itemId/versions",
+                  "description": "List saved item versions",
+                  "method": "GET",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}/versions",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "DELETE /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Move an item and descendants to Trash",
+              "method": "DELETE",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Read one item (folders include their subtree)",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/items",
+              "description": "Create a folder or request",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"type\": \"request\",\n  \"parentId\": null,\n  \"name\": \"\",\n  \"description\": \"\",\n  \"method\": \"GET\",\n  \"url\": \"\",\n  \"queryParams\": [],\n  \"headers\": [],\n  \"body\": null,\n  \"auth\": {\n    \"type\": \"inherit\"\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PUT /api/v1/collections/:collectionId/items/:itemId",
+              "description": "Save one item’s fields",
+              "method": "PUT",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/items/{{itemId}}",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"type\": \"request\",\n  \"name\": \"\",\n  \"description\": \"\",\n  \"method\": \"GET\",\n  \"url\": \"\",\n  \"queryParams\": [],\n  \"headers\": [],\n  \"body\": null,\n  \"auth\": {\n    \"type\": \"inherit\"\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Openapi",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/openapi",
+              "description": "Create a collection from an OpenAPI 3.0/3.1 spec",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/openapi",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"spec\": {\n    \"openapi\": \"3.1.0\",\n    \"info\": {\n      \"title\": \"Example API\",\n      \"version\": \"1.0.0\"\n    },\n    \"paths\": {\n      \"/health\": {\n        \"get\": {}\n      }\n    }\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Run",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/collections/:collectionId/run",
+              "description": "Run all active requests in sequence",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/run",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Runs",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/collections/:collectionId/runs",
+              "description": "List this user’s run history",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/runs",
+              "queryParams": [
+                {
+                  "key": "limit",
+                  "value": "25",
+                  "description": "",
+                  "enabled": false
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "enabled": false
+                }
+              ],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/collections/:collectionId/runs/:runId",
+              "description": "Read one run and its per-request results",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/runs/{{runId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Sync",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Openapi",
+              "description": "",
+              "items": [
+                {
+                  "type": "folder",
+                  "name": "Apply",
+                  "description": "",
+                  "items": [
+                    {
+                      "type": "request",
+                      "name": "POST /api/v1/collections/:collectionId/sync/openapi/apply",
+                      "description": "Apply selected OpenAPI changes and link the source",
+                      "method": "POST",
+                      "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/sync/openapi/apply",
+                      "queryParams": [],
+                      "headers": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json",
+                          "description": "",
+                          "enabled": true
+                        }
+                      ],
+                      "body": {
+                        "type": "json",
+                        "content": "{\n  \"spec\": {\n    \"openapi\": \"3.1.0\",\n    \"info\": {\n      \"title\": \"Example API\",\n      \"version\": \"1.0.0\"\n    },\n    \"paths\": {\n      \"/health\": {\n        \"get\": {\n          \"operationId\": \"getHealth\"\n        }\n      }\n    }\n  },\n  \"previewToken\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n  \"adopt\": {},\n  \"conflicts\": {},\n  \"deleteItemIds\": [],\n  \"recreate\": []\n}"
+                      },
+                      "auth": {
+                        "type": "none"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "folder",
+                  "name": "Preview",
+                  "description": "",
+                  "items": [
+                    {
+                      "type": "request",
+                      "name": "POST /api/v1/collections/:collectionId/sync/openapi/preview",
+                      "description": "Preview OpenAPI source changes",
+                      "method": "POST",
+                      "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/sync/openapi/preview",
+                      "queryParams": [],
+                      "headers": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json",
+                          "description": "",
+                          "enabled": true
+                        }
+                      ],
+                      "body": {
+                        "type": "json",
+                        "content": "{\n  \"spec\": {\n    \"openapi\": \"3.1.0\",\n    \"info\": {\n      \"title\": \"Example API\",\n      \"version\": \"1.0.0\"\n    },\n    \"paths\": {\n      \"/health\": {\n        \"get\": {\n          \"operationId\": \"getHealth\"\n        }\n      }\n    }\n  }\n}"
+                      },
+                      "auth": {
+                        "type": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Versions",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Restore",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/collections/:collectionId/versions/:versionId/restore",
+                  "description": "Restore collection metadata from a version",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/versions/{{versionId}}/restore",
+                  "queryParams": [],
+                  "headers": [],
+                  "body": null,
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/collections/:collectionId/versions",
+              "description": "List saved collection metadata versions",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}/versions",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "DELETE /api/v1/collections/:collectionId",
+          "description": "Move a collection and its items to Trash",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/collections",
+          "description": "List active collections",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/collections",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/collections/:collectionId",
+          "description": "Read a collection with its active tree",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/collections",
+          "description": "Create a collection with an optional nested tree",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/collections",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"items\": []\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "PUT /api/v1/collections/:collectionId",
+          "description": "Save collection metadata",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/v1/collections/{{collectionId}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Environments",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Clone",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/environments/:environmentId/clone",
+              "description": "Copy an environment under a free name",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}/clone",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "folder",
+          "name": "Variables",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "POST /api/v1/environments/:environmentId/variables",
+              "description": "Append one variable to an environment",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}/variables",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"key\": \"\",\n  \"value\": \"\",\n  \"enabled\": true\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "DELETE /api/v1/environments/:environmentId",
+          "description": "Move an environment to Trash",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/environments",
+          "description": "List environments",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/environments",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/environments/:environmentId",
+          "description": "Read an environment",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/environments",
+          "description": "Create an environment",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/environments",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"variables\": []\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "PUT /api/v1/environments/:environmentId",
+          "description": "Replace environment metadata and variables",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"name\": \"\",\n  \"variables\": []\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Events",
+      "description": "",
+      "items": [
+        {
+          "type": "request",
+          "name": "GET /api/v1/events",
+          "description": "Server-Sent Events change and presence stream",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/events",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Preferences",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Variable Order",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/preferences/variable-order",
+              "description": "Read variable-order preferences",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/preferences/variable-order",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PUT /api/v1/preferences/variable-order",
+              "description": "Save variable-order preferences",
+              "method": "PUT",
+              "url": "{{baseUrl}}/api/v1/preferences/variable-order",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"preferences\": {\n    \"version\": 1,\n    \"sort\": null,\n    \"manual\": {\n      \"user\": [],\n      \"global\": [],\n      \"environments\": {}\n    },\n    \"updatedAt\": \"\"\n  }\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Presence",
+      "description": "",
+      "items": [
+        {
+          "type": "request",
+          "name": "PUT /api/v1/presence",
+          "description": "Refresh or clear this browser tab location",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/v1/presence",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"clientId\": \"browser-tab\",\n  \"location\": null\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Proxy",
+      "description": "",
+      "items": [
+        {
+          "type": "request",
+          "name": "GET /api/v1/proxy",
+          "description": "Read server-side execution availability and allowed hosts",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/proxy",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/proxy",
+          "description": "Execute an HTTP request through the configured proxy",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/proxy",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"method\": \"GET\",\n  \"url\": \"https://example.com\",\n  \"headers\": [],\n  \"body\": null\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Teams",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Members",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "DELETE /api/v1/teams/:teamId/members/:userId",
+              "description": "Remove a team member (owner only)",
+              "method": "DELETE",
+              "url": "{{baseUrl}}/api/v1/teams/{{teamId}}/members/{{userId}}",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "GET /api/v1/teams/:teamId/members",
+              "description": "List team members",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/teams/{{teamId}}/members",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PATCH /api/v1/teams/:teamId/members/:userId",
+              "description": "Update a team member role (owner only)",
+              "method": "PATCH",
+              "url": "{{baseUrl}}/api/v1/teams/{{teamId}}/members/{{userId}}",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"role\": \"member\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/teams/:teamId/members",
+              "description": "Add a team member (owner only)",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/teams/{{teamId}}/members",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"email\": \"\",\n  \"role\": \"member\"\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/teams",
+          "description": "List teams for the signed-in user",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/teams",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Trash",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Restore",
+          "description": "",
+          "items": [
+            {
+              "type": "folder",
+              "name": "Check",
+              "description": "",
+              "items": [
+                {
+                  "type": "request",
+                  "name": "POST /api/v1/trash/:id/restore/check",
+                  "description": "Check whether a restore would conflict",
+                  "method": "POST",
+                  "url": "{{baseUrl}}/api/v1/trash/{{id}}/restore/check",
+                  "queryParams": [],
+                  "headers": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json",
+                      "description": "",
+                      "enabled": true
+                    }
+                  ],
+                  "body": {
+                    "type": "json",
+                    "content": "{}"
+                  },
+                  "auth": {
+                    "type": "none"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "request",
+              "name": "POST /api/v1/trash/:id/restore",
+              "description": "Restore a trashed resource or subtree",
+              "method": "POST",
+              "url": "{{baseUrl}}/api/v1/trash/{{id}}/restore",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"collectionName\": \"\",\n  \"nameOverrides\": {}\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/trash",
+          "description": "List restorable deleted roots",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/trash",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "folder",
+      "name": "Variables",
+      "description": "",
+      "items": [
+        {
+          "type": "folder",
+          "name": "Order",
+          "description": "",
+          "items": [
+            {
+              "type": "request",
+              "name": "GET /api/v1/variables/order",
+              "description": "Read the saved display order of variable names",
+              "method": "GET",
+              "url": "{{baseUrl}}/api/v1/variables/order",
+              "queryParams": [],
+              "headers": [],
+              "body": null,
+              "auth": {
+                "type": "none"
+              }
+            },
+            {
+              "type": "request",
+              "name": "PUT /api/v1/variables/order",
+              "description": "Replace the saved display order",
+              "method": "PUT",
+              "url": "{{baseUrl}}/api/v1/variables/order",
+              "queryParams": [],
+              "headers": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "description": "",
+                  "enabled": true
+                }
+              ],
+              "body": {
+                "type": "json",
+                "content": "{\n  \"order\": []\n}"
+              },
+              "auth": {
+                "type": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "request",
+          "name": "DELETE /api/v1/variables/:scope/:key",
+          "description": "Forget one scoped variable",
+          "method": "DELETE",
+          "url": "{{baseUrl}}/api/v1/variables/{{scope}}/{{key}}",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "GET /api/v1/variables",
+          "description": "List this user’s and team global variables",
+          "method": "GET",
+          "url": "{{baseUrl}}/api/v1/variables",
+          "queryParams": [],
+          "headers": [],
+          "body": null,
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "PATCH /api/v1/variables/:scope/:key",
+          "description": "Update a variable value and/or rename it",
+          "method": "PATCH",
+          "url": "{{baseUrl}}/api/v1/variables/{{scope}}/{{key}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"key\": \"\",\n  \"value\": \"\"\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "POST /api/v1/variables/:scope",
+          "description": "Create a scoped variable",
+          "method": "POST",
+          "url": "{{baseUrl}}/api/v1/variables/{{scope}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"key\": \"\",\n  \"value\": \"\"\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        },
+        {
+          "type": "request",
+          "name": "PUT /api/v1/variables/:scope/:key",
+          "description": "Save a scoped variable value",
+          "method": "PUT",
+          "url": "{{baseUrl}}/api/v1/variables/{{scope}}/{{key}}",
+          "queryParams": [],
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "enabled": true
+            }
+          ],
+          "body": {
+            "type": "json",
+            "content": "{\n  \"value\": \"\"\n}"
+          },
+          "auth": {
+            "type": "none"
+          }
+        }
+      ]
+    },
+    {
+      "type": "request",
+      "name": "GET /health",
+      "description": "Liveness check",
+      "method": "GET",
+      "url": "{{baseUrl}}/health",
+      "queryParams": [],
+      "headers": [],
+      "body": null,
+      "auth": {
+        "type": "none"
+      }
+    }
+  ]
+}

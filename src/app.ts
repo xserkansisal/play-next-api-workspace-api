@@ -25,8 +25,10 @@ import { createPreferencesRouter } from "./routes/preferences.js";
 import { createPresenceRouter } from "./routes/presence.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createTeamsRouter } from "./routes/teams.js";
+import { createActivityRouter } from "./routes/activity.js";
 import type { CollectionsRouterOptions } from "./routes/collections.js";
 import { IMPORT_BODY_LIMIT } from "./validation/schemas.js";
+import { OPENAPI_BODY_LIMIT } from "./validation/openapiSchemas.js";
 
 export interface CreateAppOptions {
   env: Env;
@@ -85,6 +87,8 @@ export function createApp({
   // Parsed here, ahead of the general parser, so an import gets its own smaller limit; the
   // general parser then sees the body as already read and leaves it alone.
   app.use("/api/v1/collections/:collectionId/import", express.json({ limit: IMPORT_BODY_LIMIT }));
+  app.use("/api/v1/collections/:collectionId/sync/openapi", express.json({ limit: OPENAPI_BODY_LIMIT }));
+  app.use("/api/v1/collections/openapi", express.json({ limit: OPENAPI_BODY_LIMIT }));
   app.use(express.json({ limit: "50mb" }));
   app.use("/api/v1/auth", createAuthRouter(db, env, emailCodeSender, logger));
   app.use(
@@ -102,6 +106,7 @@ export function createApp({
   app.use("/api/v1/trash", requireAuth, requireTeam, contentEditor, createTrashRouter(db, events));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
   app.use("/api/v1/teams", requireAuth, createTeamsRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
+  app.use("/api/v1/activity", requireAuth, requireTeam, createActivityRouter(db));
   app.use("/api/v1/admin", requireAuth, requireSystemAdmin, createAdminRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
 
   app.use(notFoundHandler);

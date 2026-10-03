@@ -17,6 +17,7 @@ import { findActiveCollection } from "./collections.js";
 import { nowIso } from "./common.js";
 import { readItem } from "./items.js";
 import { findActiveItem, findActiveSiblingFolder, wholeSubtreeIds, type DbExecutor, type ItemNode } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 export interface MovedItem {
   item: ItemNode;
@@ -116,6 +117,16 @@ export function moveItem(
       .update(items)
       .set({ parentId, updatedAt: nowIso(), updatedBy: actorId })
       .where(eq(items.id, itemId));
+    await recordActivity(tx, {
+      teamId: source.teamId,
+      actorId,
+      action: "item.moved",
+      resourceType: row.kind,
+      resourceId: itemId,
+      resourceName: row.name,
+      collectionId: targetCollectionId,
+      details: { sourceCollectionId: collectionId, targetCollectionId, targetParentId: parentId },
+    });
 
     return { item: await readItem(tx, targetCollectionId, itemId), sourceCollectionId: collectionId };
   });

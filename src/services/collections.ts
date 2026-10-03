@@ -6,6 +6,7 @@ import { ConflictError, NotFoundError } from "../errors.js";
 import type { CreateCollectionInput, UpdateCollectionInput } from "../validation/schemas.js";
 import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
 import { insertTree, loadActiveTree, type DbExecutor, type ItemNode } from "./tree.js";
+import { recordActivity } from "./activity.js";
 import type { ScopedAuth } from "../validation/schemas.js";
 import {
   findCollectionVersion,
@@ -124,6 +125,15 @@ export async function restoreCollectionVersion(
         updatedBy: actorId,
       })
       .where(eq(collections.id, id));
+    await recordActivity(tx, {
+      teamId: current.teamId,
+      actorId,
+      action: "collection.version_restored",
+      resourceType: "collection",
+      resourceId: id,
+      resourceName: snapshot.name,
+      details: { changedFields: ["name", "description", "auth"] },
+    });
     return toSummary(tx, await requireActiveCollection(tx, id));
   });
 }
@@ -161,6 +171,16 @@ export function createCollection(
         })
         ;
       await insertTree(tx, id, null, input.items, timestamp, actorId);
+      await recordActivity(tx, {
+        teamId,
+        actorId,
+        action: "collection.created",
+        resourceType: "collection",
+        resourceId: id,
+        resourceName: input.name,
+        details: { itemCount: countTreeItems(input.items) },
+        createdAt: timestamp,
+      });
       return readCollection(tx, id);
     });
 }
@@ -185,6 +205,21 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
         .set(changes)
         .where(eq(collections.id, id))
         ;
+      await recordActivity(tx, {
+        teamId: current.teamId,
+        actorId,
+        action: "collection.updated",
+        resourceType: "collection",
+        resourceId: id,
+        resourceName: input.name,
+        details: {
+          changedFields: [
+            ...(current.name !== input.name ? ["name"] : []),
+            ...(current.description !== input.description ? ["description"] : []),
+            ...(input.auth !== undefined && JSON.stringify(current.authConfig) !== JSON.stringify(input.auth) ? ["auth"] : []),
+          ],
+        },
+      });
       return toSummary(tx, await requireActiveCollection(tx, id));
     });
 }
@@ -192,13 +227,26 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
 /** Moves a collection and all of its active items to Trash as one restorable root. */
 export function trashCollection(db: AppDatabase, id: string, actorId: string): Promise<{ id: string; deletedAt: string }> {
   return db.transaction(async (tx) => {
-      await requireActiveCollection(tx, id);
+      const current = await requireActiveCollection(tx, id);
       const timestamp = nowIso();
       await tx.update(items)
         .set({ deletedAt: timestamp, trashRootId: id, updatedAt: timestamp, updatedBy: actorId })
         .where(and(eq(items.collectionId, id), isNull(items.deletedAt)))
         ;
       await tx.update(collections).set({ deletedAt: timestamp, updatedAt: timestamp, updatedBy: actorId }).where(eq(collections.id, id));
+      await recordActivity(tx, {
+        teamId: current.teamId,
+        actorId,
+        action: "collection.trashed",
+        resourceType: "collection",
+        resourceId: id,
+        resourceName: current.name,
+        createdAt: timestamp,
+      });
       return { id, deletedAt: timestamp };
     });
+}
+
+function countTreeItems(nodes: CreateCollectionInput["items"]): number {
+  return nodes.reduce((total, node) => total + 1 + (node.type === "folder" ? countTreeItems(node.items) : 0), 0);
 }

@@ -29,6 +29,7 @@ import { nameKey, newId, nowIso } from "./common.js";
 import { copyNameAsync } from "./copyName.js";
 import { readItem } from "./items.js";
 import { activeSubtreeIds, findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 type ItemRow = typeof items.$inferSelect;
 
@@ -163,6 +164,16 @@ export function cloneCollection(db: AppDatabase, id: string, actorId: string): P
     // Nothing is re-rooted or renamed here: every row keeps its own parent within the new
     // collection, and the collection's new name is the only one that had to be free.
     await copySubtree(tx, rows, newCollectionId, { rootId: null, rootParentId: null, rootName: null }, timestamp, actorId);
+    await recordActivity(tx, {
+      teamId: source.teamId,
+      actorId,
+      action: "collection.cloned",
+      resourceType: "collection",
+      resourceId: newCollectionId,
+      resourceName: name,
+      details: { sourceCollectionId: id, itemCount: rows.length },
+      createdAt: timestamp,
+    });
 
     return readCollection(tx, newCollectionId);
   });
@@ -193,7 +204,7 @@ async function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: 
  */
 export function cloneItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): Promise<ItemNode> {
   return db.transaction(async (tx) => {
-    await requireActiveCollection(tx, collectionId);
+    const collection = await requireActiveCollection(tx, collectionId);
     const source = await findActiveItem(tx, collectionId, itemId);
     if (!source) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
 
@@ -219,6 +230,17 @@ export function cloneItem(db: AppDatabase, collectionId: string, itemId: string,
       timestamp,
       actorId,
     );
+    await recordActivity(tx, {
+      teamId: collection.teamId,
+      actorId,
+      action: "item.cloned",
+      resourceType: source.kind,
+      resourceId: newIds.get(itemId)!,
+      resourceName: name,
+      collectionId,
+      details: { sourceItemId: itemId, subtreeItemCount: rows.length },
+      createdAt: timestamp,
+    });
     return readItem(tx, collectionId, newIds.get(itemId)!);
   });
 }

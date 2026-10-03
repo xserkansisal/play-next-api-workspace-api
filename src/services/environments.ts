@@ -7,6 +7,7 @@ import type { EnvironmentInput, EnvironmentVariableCreateInput } from "../valida
 import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./common.js";
 import { copyNameAsync } from "./copyName.js";
 import type { DbExecutor } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 export interface EnvironmentVariable {
   key: string;
@@ -80,7 +81,7 @@ export async function addEnvironmentVariable(
 ): Promise<Environment> {
   try {
     return await db.transaction(async (tx) => {
-      const [environment] = await tx.select({ id: environments.id })
+      const [environment] = await tx.select({ id: environments.id, name: environments.name, teamId: environments.teamId })
         .from(environments)
         .where(and(eq(environments.id, id), isNull(environments.deletedAt)))
         .limit(1)
@@ -107,6 +108,16 @@ export async function addEnvironmentVariable(
       });
       const updatedAt = nowIso();
       await tx.update(environments).set({ updatedAt, updatedBy: actorId }).where(eq(environments.id, id));
+      await recordActivity(tx, {
+        teamId: environment.teamId,
+        actorId,
+        action: "environment.variable_added",
+        resourceType: "environment",
+        resourceId: id,
+        resourceName: environment.name,
+        details: { variableKey: input.key },
+        createdAt: updatedAt,
+      });
       return readEnvironment(tx, id);
     });
   } catch (error) {
@@ -181,6 +192,16 @@ export function createEnvironment(db: AppDatabase, teamId: string, input: Enviro
         })
         ;
       await writeVariables(tx, id, input.variables);
+      await recordActivity(tx, {
+        teamId,
+        actorId,
+        action: "environment.created",
+        resourceType: "environment",
+        resourceId: id,
+        resourceName: input.name,
+        details: { variableCount: input.variables.length },
+        createdAt: timestamp,
+      });
       return readEnvironment(tx, id);
     });
 }
@@ -197,6 +218,15 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
         .where(eq(environments.id, id))
         ;
       await writeVariables(tx, id, input.variables);
+      await recordActivity(tx, {
+        teamId: current.teamId,
+        actorId,
+        action: "environment.updated",
+        resourceType: "environment",
+        resourceId: id,
+        resourceName: input.name,
+        details: { changedFields: [...(current.name !== input.name ? ["name"] : []), "variables"], variableCount: input.variables.length },
+      });
       return readEnvironment(tx, id);
     });
 }
@@ -231,15 +261,34 @@ export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): 
         })
         ;
       await writeVariables(tx, newEnvironmentId, source.variables);
+      await recordActivity(tx, {
+        teamId,
+        actorId,
+        action: "environment.cloned",
+        resourceType: "environment",
+        resourceId: newEnvironmentId,
+        resourceName: name,
+        details: { sourceEnvironmentId: id, variableCount: source.variables.length },
+        createdAt: timestamp,
+      });
       return readEnvironment(tx, newEnvironmentId);
     });
 }
 
 export function trashEnvironment(db: AppDatabase, id: string, actorId: string): Promise<{ id: string; deletedAt: string }> {
   return db.transaction(async (tx) => {
-      await requireActive(tx, id);
+      const current = await requireActive(tx, id);
       const deletedAt = nowIso();
       await tx.update(environments).set({ deletedAt, updatedAt: deletedAt, updatedBy: actorId }).where(eq(environments.id, id));
+      await recordActivity(tx, {
+        teamId: current.teamId,
+        actorId,
+        action: "environment.trashed",
+        resourceType: "environment",
+        resourceId: id,
+        resourceName: current.name,
+        createdAt: deletedAt,
+      });
       return { id, deletedAt };
     });
 }

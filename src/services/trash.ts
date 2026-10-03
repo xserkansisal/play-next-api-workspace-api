@@ -10,6 +10,7 @@ import { findActiveCollection, findActiveCollectionByName, readCollection, type 
 import { findActiveEnvironmentByName, readEnvironment, type Environment } from "./environments.js";
 import { readItem } from "./items.js";
 import { findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 export type TrashKind = "collection" | "folder" | "request" | "environment";
 
@@ -260,6 +261,16 @@ export function restoreFromTrash(
           })
           .where(eq(environments.id, id))
           ;
+        await recordActivity(tx, {
+          teamId: root.teamId,
+          actorId,
+          action: "environment.restored",
+          resourceType: "environment",
+          resourceId: id,
+          resourceName: name ?? root.row.name,
+          details: { nameChanged: name !== undefined && name !== root.row.name },
+          createdAt: timestamp,
+        });
         return { resource: { kind: "environment", environment: await readEnvironment(tx, id) }, restoredAt: timestamp };
       }
 
@@ -287,8 +298,29 @@ export function restoreFromTrash(
       }
 
       if (root.kind === "collection") {
+        await recordActivity(tx, {
+          teamId: root.teamId,
+          actorId,
+          action: "collection.restored",
+          resourceType: "collection",
+          resourceId: id,
+          resourceName: input.collectionName ?? root.row.name,
+          details: { restoredItemCount: ids.length, renamedItemCount: restoreRows.filter((row) => overrides.has(row.id)).length },
+          createdAt: timestamp,
+        });
         return { resource: { kind: "collection", collection: await readCollection(tx, id) }, restoredAt: timestamp };
       }
+      await recordActivity(tx, {
+        teamId: root.teamId,
+        actorId,
+        action: "item.restored",
+        resourceType: root.row.kind,
+        resourceId: id,
+        resourceName: overrides.get(id) ?? root.row.name,
+        collectionId: root.row.collectionId,
+        details: { restoredItemCount: ids.length, renamedItemCount: restoreRows.filter((row) => overrides.has(row.id)).length },
+        createdAt: timestamp,
+      });
       return { resource: { kind: root.row.kind, item: await readItem(tx, root.row.collectionId, id) }, restoredAt: timestamp };
     });
 }

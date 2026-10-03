@@ -5,6 +5,7 @@ import { ConflictError, HttpError, NotFoundError } from "../errors.js";
 import type { VariableOrderPreferences } from "../validation/schemas.js";
 import { newId, nowIso } from "./common.js";
 import type { DbExecutor } from "./tree.js";
+import { recordActivity } from "./activity.js";
 
 /**
  * Where a captured value lives.
@@ -147,6 +148,18 @@ export async function setVariable(
       await tx.update(variables)
         .set({ value, updatedAt: now, updatedBy: actor.userId })
         .where(eq(variables.id, existing.id));
+      if (scope === "global") {
+        await recordActivity(tx, {
+          teamId: actor.teamId,
+          actorId: actor.userId,
+          action: "variable.updated",
+          resourceType: "variable",
+          resourceId: existing.id,
+          resourceName: key,
+          details: { changedFields: ["value"] },
+          createdAt: now,
+        });
+      }
       return { scope, key, value, updatedAt: now, updatedBy: actor.userId };
     }
 
@@ -157,8 +170,9 @@ export async function setVariable(
       throw new HttpError(422, `The ${scope} variable limit of ${limit} has been reached`, "VARIABLE_LIMIT_REACHED");
     }
 
+    const id = newId();
     await tx.insert(variables).values({
-      id: newId(),
+      id,
       scope,
       ...ownerFor(scope, actor),
       key,
@@ -167,6 +181,17 @@ export async function setVariable(
       updatedAt: now,
       updatedBy: actor.userId,
     });
+    if (scope === "global") {
+      await recordActivity(tx, {
+        teamId: actor.teamId,
+        actorId: actor.userId,
+        action: "variable.created",
+        resourceType: "variable",
+        resourceId: id,
+        resourceName: key,
+        createdAt: now,
+      });
+    }
     return { scope, key, value, updatedAt: now, updatedBy: actor.userId };
   });
 }
@@ -199,8 +224,9 @@ export async function createVariable(
       }
 
       const now = nowIso();
+      const id = newId();
       await tx.insert(variables).values({
-        id: newId(),
+        id,
         scope,
         ...ownerFor(scope, actor),
         key,
@@ -209,6 +235,17 @@ export async function createVariable(
         updatedAt: now,
         updatedBy: actor.userId,
       });
+      if (scope === "global") {
+        await recordActivity(tx, {
+          teamId: actor.teamId,
+          actorId: actor.userId,
+          action: "variable.created",
+          resourceType: "variable",
+          resourceId: id,
+          resourceName: key,
+          createdAt: now,
+        });
+      }
       return { scope, key, value, updatedAt: now, updatedBy: actor.userId };
     });
   } catch (error) {
@@ -250,6 +287,21 @@ export async function updateVariable(
       await tx.update(variables)
         .set({ key: updatedKey, value, updatedAt, updatedBy: actor.userId })
         .where(eq(variables.id, existing.id));
+      if (scope === "global") {
+        await recordActivity(tx, {
+          teamId: actor.teamId,
+          actorId: actor.userId,
+          action: updatedKey === key ? "variable.updated" : "variable.renamed",
+          resourceType: "variable",
+          resourceId: existing.id,
+          resourceName: updatedKey,
+          details: {
+            changedFields: [...(updatedKey !== key ? ["key"] : []), ...(patch.value !== undefined ? ["value"] : [])],
+            ...(updatedKey !== key ? { previousKey: key } : {}),
+          },
+          createdAt: updatedAt,
+        });
+      }
       return { scope, key: updatedKey, value, updatedAt, updatedBy: actor.userId };
     });
   } catch (error) {
@@ -264,9 +316,21 @@ export async function updateVariable(
 }
 
 export async function deleteVariable(db: AppDatabase, actor: VariableActor, scope: VariableScope, key: string): Promise<void> {
-  const [existing] = await db.select().from(variables).where(matches(scope, actor, key)).limit(1);
-  if (!existing) throw new NotFoundError(`No ${scope} variable named "${key}"`);
-  await db.delete(variables).where(eq(variables.id, existing.id));
+  await db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(variables).where(matches(scope, actor, key)).limit(1).for("update");
+    if (!existing) throw new NotFoundError(`No ${scope} variable named "${key}"`);
+    await tx.delete(variables).where(eq(variables.id, existing.id));
+    if (scope === "global") {
+      await recordActivity(tx, {
+        teamId: actor.teamId,
+        actorId: actor.userId,
+        action: "variable.deleted",
+        resourceType: "variable",
+        resourceId: existing.id,
+        resourceName: existing.key,
+      });
+    }
+  });
 }
 
 function isDuplicateEntry(error: unknown): boolean {

@@ -16,6 +16,10 @@ import { cloneCollection, cloneItem } from "../services/clone.js";
 import { createItem, getItemVersions, readItem, restoreItemVersion, trashItem, updateItem } from "../services/items.js";
 import { moveItem } from "../services/move.js";
 import { importItems } from "../services/import.js";
+import { convertOpenApiSpec } from "../services/openapi.js";
+import { exportCollectionAsOpenApi } from "../services/openapiExport.js";
+import { applyOpenApiSync, previewOpenApiSync } from "../services/openapiSync.js";
+import { stringify as stringifyYaml } from "yaml";
 import { HttpError } from "../errors.js";
 import { createUserRateLimit, type UserRateLimitOptions } from "../middleware/rateLimit.js";
 import {
@@ -29,6 +33,13 @@ import {
   updateCollectionSchema,
   updateItemSchema,
 } from "../validation/schemas.js";
+import {
+  createOpenApiCollectionSchema,
+  exportOpenApiQuerySchema,
+  applyOpenApiSyncSchema,
+  importOpenApiSchema,
+  previewOpenApiSyncSchema,
+} from "../validation/openapiSchemas.js";
 
 export interface CollectionsRouterOptions {
   importRateLimit?: UserRateLimitOptions;
@@ -48,6 +59,26 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
     res.json({ collections: await listCollections(db, requestTeamId(req)) });
   });
 
+  router.post("/openapi", importRateLimit, async (req, res) => {
+    const input = createOpenApiCollectionSchema.parse(req.body);
+    const converted = convertOpenApiSpec(input.spec);
+    const collectionInput = createCollectionSchema.parse({
+      name: input.name ?? converted.name,
+      description: input.description ?? converted.description,
+      auth: converted.auth,
+      items: converted.items,
+    });
+    const collection = await createCollection(db, requestTeamId(req), collectionInput, authenticatedUserId(req));
+    events.publish(requestTeamId(req), {
+      kind: "collection",
+      id: collection.id,
+      collectionId: null,
+      operation: "created",
+      changedAt: collection.updatedAt,
+    });
+    res.status(201).json({ collection, warnings: converted.warnings });
+  });
+
   router.post("/", async (req, res) => {
     const collection = await createCollection(db, requestTeamId(req), createCollectionSchema.parse(req.body), authenticatedUserId(req));
     events.publish(requestTeamId(req), { kind: "collection", id: collection.id, collectionId: null, operation: "created", changedAt: collection.updatedAt });
@@ -56,6 +87,19 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
 
   router.get("/:collectionId", async (req, res) => {
     res.json(await readCollection(db, req.params.collectionId));
+  });
+
+  router.get("/:collectionId/export/openapi", async (req, res) => {
+    const { version, format } = exportOpenApiQuerySchema.parse(req.query);
+    const collection = await readCollection(db, req.params.collectionId);
+    const document = exportCollectionAsOpenApi(collection, version);
+    const body = format === "yaml" ? stringifyYaml(document) : `${JSON.stringify(document, null, 2)}\n`;
+    const extension = format === "yaml" ? "yaml" : "json";
+    const safeName = collection.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "collection";
+    res
+      .type(format === "yaml" ? "application/yaml" : "application/vnd.oai.openapi+json")
+      .attachment(`${safeName}-openapi.${extension}`)
+      .send(body);
   });
 
   router.get("/:collectionId/versions", async (req, res) => {
@@ -117,6 +161,73 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
       }
     }
     res.status(result.dryRun ? 200 : 201).json(result);
+  });
+
+  router.post("/:collectionId/import/openapi", importRateLimit, async (req, res) => {
+    const input = importOpenApiSchema.parse(req.body);
+    const converted = convertOpenApiSpec(input.spec);
+    const importInput = importItemsSchema.parse({
+      parentId: input.parentId,
+      onConflict: input.onConflict,
+      dryRun: input.dryRun,
+      items: converted.items,
+    });
+    const result = await importItems(db, req.params.collectionId as string, importInput, authenticatedUserId(req));
+    if (!result.dryRun) {
+      if (result.roots.length > MAX_ROOT_EVENTS) {
+        events.publish(requestTeamId(req), {
+          kind: "collection",
+          id: result.collectionId,
+          collectionId: null,
+          operation: "updated",
+          changedAt: result.changedAt,
+        });
+      } else {
+        for (const root of result.roots) {
+          events.publish(requestTeamId(req), {
+            kind: root.kind,
+            id: root.id,
+            collectionId: result.collectionId,
+            operation: "created",
+            changedAt: result.changedAt,
+          });
+        }
+      }
+    }
+    res.status(result.dryRun ? 200 : 201).json({ ...result, warnings: [...converted.warnings, ...result.warnings] });
+  });
+
+  router.post("/:collectionId/sync/openapi/preview", importRateLimit, async (req, res) => {
+    const { spec } = previewOpenApiSyncSchema.parse(req.body);
+    res.json(await previewOpenApiSync(db, req.params.collectionId as string, spec));
+  });
+
+  router.post("/:collectionId/sync/openapi/apply", importRateLimit, async (req, res) => {
+    const result = await applyOpenApiSync(
+      db,
+      req.params.collectionId as string,
+      applyOpenApiSyncSchema.parse(req.body),
+      authenticatedUserId(req),
+    );
+    for (const itemId of result.deletedItemIds) {
+      events.publish(requestTeamId(req), {
+        kind: "request",
+        id: itemId,
+        collectionId: result.collectionId,
+        operation: "trashed",
+        changedAt: result.changedAt,
+      });
+    }
+    if (result.applied.added + result.applied.adopted + result.applied.updated + result.applied.moved + result.applied.recreated > 0) {
+      events.publish(requestTeamId(req), {
+        kind: "collection",
+        id: result.collectionId,
+        collectionId: null,
+        operation: "updated",
+        changedAt: result.changedAt,
+      });
+    }
+    res.json(result);
   });
 
   router.post("/:collectionId/items", async (req, res) => {
