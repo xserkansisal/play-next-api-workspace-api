@@ -162,6 +162,13 @@
       "when": 1791008592799,
       "tag": "0022_dashing_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1791019646974,
+      "tag": "0023_white_jigsaw",
+      "breakpoints": true
     }
   ]
 }

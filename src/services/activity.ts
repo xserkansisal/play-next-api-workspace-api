@@ -13,6 +13,7 @@ export const ACTIVITY_ACTIONS = [
   "collection.created",
   "collection.updated",
   "collection.version_restored",
+  "collection.snapshot_restored",
   "collection.cloned",
   "collection.trashed",
   "collection.restored",

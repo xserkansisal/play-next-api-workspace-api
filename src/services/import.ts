@@ -29,6 +29,7 @@ import { nameKey, newId, nowIso } from "./common.js";
 import { copyName } from "./copyName.js";
 import { authConfigForStorage, findActiveItem, type DbExecutor } from "./tree.js";
 import { recordActivity } from "./activity.js";
+import { recordTreeSnapshot } from "./versions.js";
 
 export interface ImportRenamed {
   path: string[];
@@ -225,12 +226,12 @@ async function writeRows(db: DbExecutor, collectionId: string, rows: FlatRow[], 
  */
 export function importItems(db: AppDatabase, collectionId: string, input: ImportItemsInput, actorId: string): Promise<ImportResult> {
   return db.transaction(async (tx) => {
+    await tx.select({ id: collections.id }).from(collections).where(eq(collections.id, collectionId)).for("update");
     const collection = await requireActiveCollection(tx, collectionId);
     const { parentId } = input;
 
     // Held until commit so a concurrent trash or move of the target waits for the import rather
     // than racing it and stranding the new rows under something no longer active.
-    await tx.select({ id: collections.id }).from(collections).where(eq(collections.id, collectionId)).for("update");
     if (parentId !== null) {
       const parent = await findActiveItem(tx, collectionId, parentId);
       if (!parent || parent.kind !== "folder") {
@@ -294,6 +295,7 @@ export function importItems(db: AppDatabase, collectionId: string, input: Import
     const base = { collectionId, parentId, dryRun: input.dryRun, created, renamed, warnings, changedAt: timestamp };
     if (input.dryRun) return { ...base, roots: [] };
 
+    await recordTreeSnapshot(tx, collectionId, actorId);
     await writeRows(tx, collectionId, rows, timestamp, actorId);
     await recordActivity(tx, {
       teamId: collection.teamId,

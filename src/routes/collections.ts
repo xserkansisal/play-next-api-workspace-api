@@ -19,6 +19,7 @@ import { importItems } from "../services/import.js";
 import { convertOpenApiSpec } from "../services/openapi.js";
 import { exportCollectionAsOpenApi } from "../services/openapiExport.js";
 import { applyOpenApiSync, previewOpenApiSync } from "../services/openapiSync.js";
+import { diffTreeSnapshots, getTreeSnapshot, listTreeSnapshots, restoreTreeSnapshot } from "../services/collectionSnapshots.js";
 import { stringify as stringifyYaml } from "yaml";
 import { HttpError } from "../errors.js";
 import { createUserRateLimit, type UserRateLimitOptions } from "../middleware/rateLimit.js";
@@ -32,6 +33,8 @@ import {
   moveItemSchema,
   updateCollectionSchema,
   updateItemSchema,
+  collectionSnapshotDiffQuerySchema,
+  collectionSnapshotListQuerySchema,
 } from "../validation/schemas.js";
 import {
   createOpenApiCollectionSchema,
@@ -104,6 +107,37 @@ export function createCollectionsRouter(db: AppDatabase, events: ChangeEventHub,
 
   router.get("/:collectionId/versions", async (req, res) => {
     res.json({ versions: await getCollectionVersions(db, req.params.collectionId) });
+  });
+
+  router.get("/:collectionId/snapshots", async (req, res) => {
+    const { limit, offset } = collectionSnapshotListQuerySchema.parse(req.query);
+    res.json(await listTreeSnapshots(db, req.params.collectionId, limit, offset));
+  });
+
+  router.get("/:collectionId/snapshots/diff", async (req, res) => {
+    const query = collectionSnapshotDiffQuerySchema.parse(req.query);
+    res.json(await diffTreeSnapshots(db, req.params.collectionId, query.from, query.to));
+  });
+
+  router.get("/:collectionId/snapshots/:snapshotId", async (req, res) => {
+    res.json(await getTreeSnapshot(db, req.params.collectionId, req.params.snapshotId));
+  });
+
+  router.post("/:collectionId/snapshots/:snapshotId/restore", async (req, res) => {
+    const collection = await restoreTreeSnapshot(
+      db,
+      req.params.collectionId,
+      req.params.snapshotId,
+      authenticatedUserId(req),
+    );
+    events.publish(requestTeamId(req), {
+      kind: "collection",
+      id: collection.id,
+      collectionId: null,
+      operation: "updated",
+      changedAt: collection.updatedAt,
+    });
+    res.json(collection);
   });
 
   router.post("/:collectionId/versions/:versionId/restore", async (req, res) => {

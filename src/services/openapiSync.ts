@@ -9,7 +9,7 @@ import { convertOpenApiSpec, type OpenApiConversion, type OpenApiOperation } fro
 import { requireActiveCollection, readCollection } from "./collections.js";
 import { findActiveSiblingFolder, type DbExecutor, type ItemNode, type RequestNode, writeRequestDetails } from "./tree.js";
 import { nameKey, newId, nowIso } from "./common.js";
-import { recordItemVersion } from "./versions.js";
+import { recordItemVersion, recordTreeSnapshot } from "./versions.js";
 import { redactRequestAuth, redactSensitiveJsonText, redactSensitiveUrl } from "./openapiValues.js";
 import { recordActivity } from "./activity.js";
 
@@ -539,11 +539,11 @@ export function applyOpenApiSync(
   ensureUniqueInputChoices(input);
   const conversion = convertOpenApiSpec(input.spec);
   return db.transaction(async (tx) => {
-    const collection = await requireActiveCollection(tx, collectionId);
     await tx.select({ id: collections.id })
       .from(collections)
       .where(and(eq(collections.id, collectionId), isNull(collections.deletedAt)))
       .for("update");
+    const collection = await requireActiveCollection(tx, collectionId);
     await tx.select().from(openapiSyncItems)
       .where(eq(openapiSyncItems.collectionId, collectionId))
       .for("update");
@@ -588,6 +588,7 @@ export function applyOpenApiSync(
       }
     }
 
+    await recordTreeSnapshot(tx, collectionId, actorId);
     const timestamp = nowIso();
     const applied = { added: 0, adopted: 0, updated: 0, moved: 0, deleted: 0, recreated: 0 };
     const deletedItemIds: string[] = [];

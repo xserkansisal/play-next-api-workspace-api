@@ -57,11 +57,14 @@ type ItemRow = typeof items.$inferSelect;
 export async function loadActiveTree(
   db: DbExecutor,
   collectionId: string,
+  options: { forUpdate?: boolean } = {},
 ): Promise<{ roots: ItemNode[]; byId: Map<string, ItemNode> }> {
-  const rows = await db.select().from(items).where(and(eq(items.collectionId, collectionId), isNull(items.deletedAt)));
-  const [collection] = await db.select({ authConfig: schema.collections.authConfig }).from(schema.collections)
+  const itemQuery = db.select().from(items).where(and(eq(items.collectionId, collectionId), isNull(items.deletedAt)));
+  const rows = options.forUpdate ? await itemQuery.for("update") : await itemQuery;
+  const collectionQuery = db.select({ authConfig: schema.collections.authConfig }).from(schema.collections)
     .where(eq(schema.collections.id, collectionId)).limit(1);
-  const nodes = await buildNodes(db, rows);
+  const [collection] = options.forUpdate ? await collectionQuery.for("update") : await collectionQuery;
+  const nodes = await buildNodes(db, rows, options.forUpdate ?? false);
 
   const roots: ItemNode[] = [];
   for (const node of nodes.values()) {
@@ -87,7 +90,7 @@ export async function loadActiveTree(
   return { roots, byId: nodes };
 }
 
-async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, ItemNode>> {
+async function buildNodes(db: DbExecutor, rows: ItemRow[], forUpdate: boolean): Promise<Map<string, ItemNode>> {
   const requestIds = rows.filter((r) => r.kind === "request").map((r) => r.id);
   const details = new Map<string, typeof requestDetails.$inferSelect>();
   const params = new Map<string, KeyValueRow[]>();
@@ -103,18 +106,20 @@ async function buildNodes(db: DbExecutor, rows: ItemRow[]): Promise<Map<string, 
   );
 
   for (const chunk of chunks(requestIds, 500)) {
-    for (const d of await db.select().from(requestDetails).where(inArray(requestDetails.itemId, chunk))) {
+    const detailsQuery = db.select().from(requestDetails).where(inArray(requestDetails.itemId, chunk));
+    for (const d of await (forUpdate ? detailsQuery.for("update") : detailsQuery)) {
       details.set(d.itemId, d);
     }
     for (const [table, target] of [
       [requestQueryParams, params],
       [requestHeaders, headers],
     ] as const) {
-      const kvRows = await db
+      const kvQuery = db
         .select()
         .from(table)
         .where(inArray(table.requestId, chunk))
         .orderBy(asc(table.requestId), asc(table.position));
+      const kvRows = await (forUpdate ? kvQuery.for("update") : kvQuery);
       for (const row of kvRows) {
         const list = target.get(row.requestId) ?? [];
         list.push({ key: row.key, value: row.value, description: row.description, enabled: row.enabled });

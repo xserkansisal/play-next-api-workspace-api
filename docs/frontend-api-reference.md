@@ -5,7 +5,8 @@ output and error codes. Source of truth is the backend code; where a behaviour i
 it is called out with **Note**.
 
 Related, more narrative docs: `frontend-authentication.md` (request auth + inheritance),
-`frontend-request-body-types.md`, `frontend-collection-runner.md`, `frontend-version-history.md`,
+`frontend-request-body-types.md`, `frontend-collection-runner.md`, `frontend-collection-snapshots.md`,
+`frontend-version-history.md`,
 `frontend-teams.md`, `frontend-roles-and-email.md`, `frontend-session-cookie.md`,
 `frontend-dev-login.md`.
 
@@ -469,9 +470,13 @@ Errors: `400 VALIDATION_ERROR`, `400 IMPORT_TOO_DEEP` (`details.maxDepth`), `400
 ---
 
 ## 11. Version history
-History exists for **collection metadata** (name, description, auth) and for **one folder/request**; not
-for whole trees. A snapshot is stored right before each successful `PUT` (and before a restore). No snapshot on
-create/delete/move. No expiry.
+History exists for **collection metadata** (name, description, auth) and for **one folder/request**.
+Whole-collection snapshots capture metadata and the complete active folder/request tree. Metadata
+and item history snapshots are recorded right before successful `PUT`s (and before a restore).
+Whole-collection snapshots are also recorded before successful item create/clone/trash/restore,
+collection trash, imports, OpenAPI sync, and moves (for both collections). No initial snapshot is
+created with a new collection; dry runs and failed mutations do not create snapshots. History has no
+automatic expiry.
 
 ### `GET /collections/:collectionId/versions`
 ### `GET /collections/:collectionId/items/:itemId/versions`
@@ -486,6 +491,29 @@ replaced state as a new version.
 **200** collection → `CollectionSummary`; item → `ItemNode`.
 Errors: `404 NOT_FOUND` (resource or version missing / belongs to another resource),
 `409 COLLECTION_NAME_CONFLICT` / `409 FOLDER_NAME_CONFLICT`.
+
+### `GET /collections/:collectionId/snapshots`
+**200** `{ "snapshots": [{ "id", "itemCount", "createdAt", "createdBy" }], "nextOffset": number | null }`
+newest first. `limit` defaults to 25 (maximum 100), `offset` defaults to 0; use `nextOffset` until
+it is `null`.
+
+### `GET /collections/:collectionId/snapshots/:snapshotId`
+**200** `{ "id", "snapshot", "itemCount", "createdAt", "createdBy" }`. The snapshot contains
+`name`, `description`, `auth`, and `items`; nested folder/request items include their stable IDs and
+all saved request/folder fields. Trashed items and audit metadata are excluded.
+
+### `GET /collections/:collectionId/snapshots/diff?from=:snapshotId&to=:snapshotId|current`
+Compare two snapshots, or one snapshot against the live collection using `to=current`.
+**200** includes `collectionFields` and `items` arrays named `added`, `removed`, `moved`, and
+`changed`. Changed items include changed field names and before/after values.
+
+### `POST /collections/:collectionId/snapshots/:snapshotId/restore` — member
+Body-less. Atomically restores collection metadata and the complete active tree. Stable IDs are
+preserved when items still belong to this collection; items missing from the selected snapshot are
+sent to Trash, and matching trashed items are reactivated. The current state is saved as a snapshot
+before restore. A snapshot item moved to another collection is not moved implicitly:
+`409 SNAPSHOT_ITEM_MOVED` includes the conflicting item IDs. Name conflicts return
+`409 COLLECTION_NAME_CONFLICT`. **200** `CollectionAggregate`.
 
 ---
 

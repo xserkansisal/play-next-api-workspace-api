@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import type { RowDataPacket } from "mysql2/promise";
 import { first } from "../db/query.js";
@@ -11,6 +11,7 @@ import { findActiveEnvironmentByName, readEnvironment, type Environment } from "
 import { readItem } from "./items.js";
 import { findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
 import { recordActivity } from "./activity.js";
+import { recordTreeSnapshot } from "./versions.js";
 
 export type TrashKind = "collection" | "folder" | "request" | "environment";
 
@@ -230,12 +231,19 @@ export function restoreFromTrash(
 ): Promise<RestoreOutcome> {
   return db.transaction(async (tx) => {
       const root = await findTrashRoot(tx, teamId, id);
+      if (root.kind === "item") {
+        await tx.select({ id: collections.id })
+          .from(collections)
+          .where(and(eq(collections.id, root.row.collectionId), isNull(collections.deletedAt)))
+          .for("update");
+      }
       const { overrides, restoreRows, blocker, conflicts } = await analyze(tx, root, input);
       if (blocker) throw new ConflictError(blocker.message, "RESTORE_BLOCKED", { blocker });
       if (conflicts.length > 0) {
         throw new ConflictError("Restoring would create duplicate names", "RESTORE_CONFLICT", { conflicts });
       }
 
+      if (root.kind === "item") await recordTreeSnapshot(tx, root.row.collectionId, actorId);
       const timestamp = nowIso();
       // Rename while still deleted so partial unique indexes never see a transient duplicate.
       for (const row of restoreRows) {

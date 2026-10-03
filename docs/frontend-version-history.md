@@ -1,7 +1,10 @@
-# Version history: frontend integration
+# Version history and collection snapshots: frontend integration
 
 Version history is available for collection metadata and for an individual folder or request.
-It does not capture a whole collection tree as a single revision.
+Collection snapshots additionally capture metadata and the complete active folder/request tree as
+one revision, which can be diffed and restored atomically.
+For snapshot response shapes, diff semantics, and restore conflicts, see
+[`frontend-collection-snapshots.md`](frontend-collection-snapshots.md).
 
 ## Endpoints
 
@@ -11,9 +14,14 @@ It does not capture a whole collection tree as a single revision.
 | `POST` | `/api/v1/collections/:collectionId/versions/:versionId/restore` | Restore collection metadata |
 | `GET` | `/api/v1/collections/:collectionId/items/:itemId/versions` | List prior fields of one folder or request |
 | `POST` | `/api/v1/collections/:collectionId/items/:itemId/versions/:versionId/restore` | Restore that folder or request's fields |
+| `GET` | `/api/v1/collections/:collectionId/snapshots` | List whole-collection snapshots (metadata only) |
+| `GET` | `/api/v1/collections/:collectionId/snapshots/:snapshotId` | Read a complete snapshot |
+| `GET` | `/api/v1/collections/:collectionId/snapshots/diff?from=:id&to=:id\|current` | Compare two snapshots or a snapshot with the current collection |
+| `POST` | `/api/v1/collections/:collectionId/snapshots/:snapshotId/restore` | Restore metadata and the complete active tree |
 
 All routes require the usual signed-in session. Collection and item IDs must refer to active
-resources. A version belonging to a different collection or item is not visible and returns `404`.
+resources. A version or snapshot belonging to a different collection or item is not visible and
+returns `404`.
 
 ## Listing versions
 
@@ -43,10 +51,24 @@ For item versions, `snapshot` has the saved item's own editable fields. A folder
 exclude item identity, parent, timestamps, attribution, folder children, and collection contents.
 
 A snapshot is recorded immediately before each successful collection or item `PUT`. Creating a
-resource does not create an initial history entry. Soft deletion and moves do not create revisions.
-History is retained without an automatic expiry.
+resource does not create an initial history entry. Whole-collection snapshots are recorded before
+successful collection/item edits, item creation and clone, item trash/restore, collection trash,
+imports, OpenAPI sync, and moves (for both affected collections). Dry runs and failed mutations do
+not create a snapshot. A whole-collection snapshot includes collection name, description, auth, and
+the active tree. It excludes trashed items and activity/attribution metadata. Snapshots are retained
+without an automatic expiry.
 Snapshots written before auth support may omit the `auth` property; treat an omitted legacy value as
 `null` when restoring collection/folder settings.
+
+The snapshot list returns `{ snapshots, nextOffset }`; `snapshots` contains
+`{ id, itemCount, createdAt, createdBy }` newest first. `limit` defaults to 25 (maximum 100) and
+`offset` defaults to 0. Continue with the returned `nextOffset`; it is `null` on the final page.
+Snapshot detail
+returns `{ id, snapshot, itemCount, createdAt, createdBy }`; `snapshot.items` is the nested active
+tree, with each item ID included so diffs and restores can track stable identities. Diff results
+include `collectionFields` plus `items.added`, `items.removed`, `items.moved`, and `items.changed`.
+Changed items include a list of changed field names and before/after field values. Send
+`to=current` to compare a saved snapshot against the live collection.
 
 ## Restoring
 
@@ -61,6 +83,12 @@ setting.
 
 Restore also records the state being replaced as a new version, so the resulting history remains
 reversible. Clients can refresh the versions list after a restore to display that new entry.
+
+Whole-collection restore reconciles the full active tree in one transaction, preserving IDs for
+items that still belong to the collection, reactivating matching trashed items, and sending items
+absent from the selected snapshot to Trash. Collection metadata is restored too. If an item from
+the snapshot has since moved to another collection, restore fails with `409 SNAPSHOT_ITEM_MOVED`
+and lists the conflicting item IDs; it never moves content across collections implicitly.
 
 ## Suggested frontend behavior
 

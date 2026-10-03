@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { items } from "../db/schema.js";
+import { collections, items } from "../db/schema.js";
 import { BadRequestError, NotFoundError } from "../errors.js";
 import type { CreateItemInput, UpdateItemInput } from "../validation/schemas.js";
 import { nameKey, newId, nowIso } from "./common.js";
@@ -15,7 +15,7 @@ import {
   type DbExecutor,
   type ItemNode,
 } from "./tree.js";
-import { findItemVersion, listItemVersions, recordItemVersion } from "./versions.js";
+import { findItemVersion, listItemVersions, recordItemVersion, recordTreeSnapshot } from "./versions.js";
 import { recordActivity } from "./activity.js";
 
 export async function readItem(db: DbExecutor, collectionId: string, itemId: string): Promise<ItemNode> {
@@ -39,6 +39,7 @@ export function restoreItemVersion(
   actorId: string,
 ): Promise<ItemNode> {
   return db.transaction(async (tx) => {
+    await lockCollectionForMutation(tx, collectionId);
     const row = await lockActiveItem(tx, collectionId, itemId);
     const collection = await requireActiveCollection(tx, collectionId);
     const current = await readItem(tx, collectionId, itemId);
@@ -51,6 +52,7 @@ export function restoreItemVersion(
       if (existing) throw folderConflictError(snapshot.name, row.parentId, existing.id);
     }
 
+    await recordTreeSnapshot(tx, collectionId, actorId);
     await recordItemVersion(tx, current, actorId);
     await tx
       .update(items)
@@ -95,8 +97,18 @@ async function lockActiveItem(db: DbExecutor, collectionId: string, itemId: stri
   return row;
 }
 
+async function lockCollectionForMutation(db: DbExecutor, collectionId: string): Promise<void> {
+  const [collection] = await db.select({ id: collections.id })
+    .from(collections)
+    .where(and(eq(collections.id, collectionId), isNull(collections.deletedAt)))
+    .limit(1)
+    .for("update");
+  if (!collection) throw new NotFoundError(`Collection ${collectionId} not found`);
+}
+
 export function createItem(db: AppDatabase, collectionId: string, input: CreateItemInput, actorId: string): Promise<ItemNode> {
   return db.transaction(async (tx) => {
+      await lockCollectionForMutation(tx, collectionId);
       const collection = await requireActiveCollection(tx, collectionId);
       if (input.parentId !== null) {
         const parent = await findActiveItem(tx, collectionId, input.parentId);
@@ -113,6 +125,7 @@ export function createItem(db: AppDatabase, collectionId: string, input: CreateI
         if (existing) throw folderConflictError(input.name, input.parentId, existing.id);
       }
 
+      await recordTreeSnapshot(tx, collectionId, actorId);
       const id = newId();
       const timestamp = nowIso();
       await tx.insert(items)
@@ -154,6 +167,7 @@ export function updateItem(
   actorId: string,
 ): Promise<ItemNode> {
   return db.transaction(async (tx) => {
+      await lockCollectionForMutation(tx, collectionId);
       const row = await lockActiveItem(tx, collectionId, itemId);
       const collection = await requireActiveCollection(tx, collectionId);
       if (row.kind !== input.type) {
@@ -168,6 +182,7 @@ export function updateItem(
       }
 
       const current = await readItem(tx, collectionId, itemId);
+      await recordTreeSnapshot(tx, collectionId, actorId);
       await recordItemVersion(tx, current, actorId);
       const changedFields = input.type === "folder" && current.type === "folder"
         ? [
@@ -215,9 +230,11 @@ export interface TrashedItem {
 
 export function trashItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): Promise<TrashedItem> {
   return db.transaction(async (tx) => {
+      await lockCollectionForMutation(tx, collectionId);
       const collection = await requireActiveCollection(tx, collectionId);
       const row = await requireActiveItem(tx, collectionId, itemId);
       const ids = await activeSubtreeIds(tx, itemId);
+      await recordTreeSnapshot(tx, collectionId, actorId);
       const timestamp = nowIso();
       for (let i = 0; i < ids.length; i += 500) {
         await tx.update(items)

@@ -211,6 +211,16 @@ export const updateCollectionSchema = z.strictObject({
 });
 export type UpdateCollectionInput = z.output<typeof updateCollectionSchema>;
 
+export const collectionSnapshotDiffQuerySchema = z.strictObject({
+  from: idSchema,
+  to: z.union([idSchema, z.literal("current")]),
+});
+
+export const collectionSnapshotListQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(100_000).default(0),
+});
+
 export const collectionRunSchema = z.strictObject({
   environmentId: idSchema.optional(),
 });

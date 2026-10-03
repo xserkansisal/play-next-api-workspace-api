@@ -157,4 +157,107 @@ describe("version history API", () => {
     await ctx.api.post(`/api/v1/collections/${other.id}/versions/${versionId}/restore`).expect(404);
     await ctx.api.get(`/api/v1/collections/${collectionId}/items/not-an-item/versions`).expect(404);
   });
+
+  it("snapshots, diffs, and restores the complete collection tree", async () => {
+    const request = (
+      await ctx.api.post(`/api/v1/collections/${collectionId}/items`)
+        .send({ type: "request", name: "Before", ...requestFields, url: "/before" })
+        .expect(201)
+    ).body;
+    await ctx.api.put(`/api/v1/collections/${collectionId}/items/${request.id}`)
+      .send({ type: "request", name: "After", ...requestFields, url: "/after" })
+      .expect(200);
+    const laterFolder = (await ctx.api.post(`/api/v1/collections/${collectionId}/items`)
+      .send({ type: "folder", name: "Added later" })
+      .expect(201)).body;
+
+    const listing = await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots`).expect(200);
+    expect(listing.body.snapshots).toHaveLength(3);
+    const firstPage = await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots?limit=2`).expect(200);
+    expect(firstPage.body.snapshots).toHaveLength(2);
+    expect(firstPage.body.nextOffset).toBe(2);
+    const lastPage = await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots?limit=2&offset=2`).expect(200);
+    expect(lastPage.body.snapshots).toHaveLength(1);
+    expect(lastPage.body.nextOffset).toBeNull();
+    const snapshots = await Promise.all(listing.body.snapshots.map(async (entry: { id: string }) =>
+      (await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots/${entry.id}`).expect(200)).body,
+    ));
+    const oldState = snapshots.find((entry: { snapshot: { items: Array<{ name: string }> } }) =>
+      entry.snapshot.items[0]?.name === "Before",
+    );
+    expect(oldState).toBeDefined();
+
+    const diff = await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots/diff`)
+      .query({ from: oldState.id, to: "current" })
+      .expect(200);
+    expect(diff.body.items.added.map((item: { path: string[] }) => item.path)).toContainEqual(["Added later"]);
+    expect(diff.body.items.changed).toContainEqual(expect.objectContaining({
+      id: request.id,
+      fields: expect.arrayContaining(["name", "url"]),
+    }));
+    expect(diff.body.collectionFields).toEqual([]);
+
+    const restored = await ctx.api.post(`/api/v1/collections/${collectionId}/snapshots/${oldState.id}/restore`).expect(200);
+    expect(restored.body.items).toHaveLength(1);
+    expect(restored.body.items[0]).toMatchObject({ id: request.id, name: "Before", url: "/before" });
+    expect((await ctx.api.get(`/api/v1/collections/${collectionId}/items/${request.id}`).expect(200)).body.name).toBe("Before");
+    expect((await ctx.api.get("/api/v1/trash").expect(200)).body.entries).toContainEqual(
+      expect.objectContaining({ id: laterFolder.id, name: "Added later", collectionId }),
+    );
+
+    const afterRestore = await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots`).expect(200);
+    expect(afterRestore.body.snapshots).toHaveLength(4);
+    expect(afterRestore.body.snapshots[0].createdBy).toBe("test@fluttersea.com");
+  });
+
+  it("rejects restoring a collection snapshot when one of its items has moved elsewhere", async () => {
+    const target = (await ctx.api.post("/api/v1/collections").send({ name: "Target" }).expect(201)).body;
+    const item = (
+      await ctx.api.post(`/api/v1/collections/${collectionId}/items`)
+        .send({ type: "request", name: "Moved", ...requestFields })
+        .expect(201)
+    ).body;
+    await ctx.api.post(`/api/v1/collections/${collectionId}/items/${item.id}/move`)
+      .send({ targetCollectionId: target.id, parentId: null })
+      .expect(200);
+
+    const snapshots = (await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots`).expect(200)).body.snapshots;
+    const details = await Promise.all(snapshots.map(async (entry: { id: string }) =>
+      (await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots/${entry.id}`).expect(200)).body,
+    ));
+    const beforeMove = details.find((entry: { snapshot: { items: Array<{ id: string }> } }) =>
+      entry.snapshot.items.some((node) => node.id === item.id),
+    );
+    expect(beforeMove).toBeDefined();
+    const snapshotId = beforeMove.id;
+    const response = await ctx.api.post(`/api/v1/collections/${collectionId}/snapshots/${snapshotId}/restore`).expect(409);
+    expect(response.body.error).toMatchObject({
+      code: "SNAPSHOT_ITEM_MOVED",
+      details: { itemIds: [item.id] },
+    });
+    expect((await ctx.api.get(`/api/v1/collections/${target.id}/items/${item.id}`).expect(200)).body.id).toBe(item.id);
+  });
+
+  it("reactivates matching items that were moved to Trash after a snapshot", async () => {
+    const item = (
+      await ctx.api.post(`/api/v1/collections/${collectionId}/items`)
+        .send({ type: "request", name: "Recoverable", ...requestFields, url: "/recoverable" })
+        .expect(201)
+    ).body;
+    await ctx.api.delete(`/api/v1/collections/${collectionId}/items/${item.id}`).expect(204);
+
+    const listed = (await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots`).expect(200)).body.snapshots;
+    const details = await Promise.all(listed.map(async (entry: { id: string }) =>
+      (await ctx.api.get(`/api/v1/collections/${collectionId}/snapshots/${entry.id}`).expect(200)).body,
+    ));
+    const beforeTrash = details.find((entry: { snapshot: { items: Array<{ id: string }> } }) =>
+      entry.snapshot.items.some((node) => node.id === item.id),
+    );
+    expect(beforeTrash).toBeDefined();
+
+    const restored = await ctx.api.post(`/api/v1/collections/${collectionId}/snapshots/${beforeTrash.id}/restore`).expect(200);
+    expect(restored.body.items).toHaveLength(1);
+    expect(restored.body.items[0]).toMatchObject({ id: item.id, name: "Recoverable", url: "/recoverable" });
+    await ctx.api.get(`/api/v1/collections/${collectionId}/items/${item.id}`).expect(200);
+  });
 });

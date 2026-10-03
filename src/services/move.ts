@@ -10,7 +10,7 @@
 
 import { eq, inArray, sql } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { items } from "../db/schema.js";
+import { collections, items } from "../db/schema.js";
 import { ConflictError, NotFoundError } from "../errors.js";
 import type { MoveItemInput } from "../validation/schemas.js";
 import { findActiveCollection } from "./collections.js";
@@ -18,6 +18,7 @@ import { nowIso } from "./common.js";
 import { readItem } from "./items.js";
 import { findActiveItem, findActiveSiblingFolder, wholeSubtreeIds, type DbExecutor, type ItemNode } from "./tree.js";
 import { recordActivity } from "./activity.js";
+import { recordTreeSnapshot } from "./versions.js";
 
 export interface MovedItem {
   item: ItemNode;
@@ -71,6 +72,12 @@ export function moveItem(
   actorId: string,
 ): Promise<MovedItem> {
   return db.transaction(async (tx) => {
+    const lockIds = [...new Set([collectionId, input.targetCollectionId])].sort();
+    await tx.select({ id: collections.id })
+      .from(collections)
+      .where(inArray(collections.id, lockIds))
+      .orderBy(collections.id)
+      .for("update");
     const source = await findActiveCollection(tx, collectionId);
     if (!source) {
       throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`, "ITEM_NOT_FOUND");
@@ -110,6 +117,8 @@ export function moveItem(
       }
     }
 
+    await recordTreeSnapshot(tx, collectionId, actorId);
+    if (targetCollectionId !== collectionId) await recordTreeSnapshot(tx, targetCollectionId, actorId);
     if (targetCollectionId !== collectionId) await rewriteCollection(tx, subtreeIds, targetCollectionId);
     // Written after the branch has landed in the target collection, so the parent reference is
     // already within one collection when the key starts checking it again.

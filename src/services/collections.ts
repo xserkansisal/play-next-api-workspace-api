@@ -11,6 +11,7 @@ import type { ScopedAuth } from "../validation/schemas.js";
 import {
   findCollectionVersion,
   listCollectionVersions,
+  recordTreeSnapshot,
   recordCollectionVersion,
 } from "./versions.js";
 
@@ -113,6 +114,7 @@ export async function restoreCollectionVersion(
     const existing = await findActiveCollectionByName(tx, current.teamId, snapshot.name, id);
     if (existing) throw collectionNameConflictError(snapshot.name, existing.id);
 
+    await recordTreeSnapshot(tx, id, actorId);
     await recordCollectionVersion(tx, id, { name: current.name, description: current.description, auth: current.authConfig }, actorId);
     await tx
       .update(collections)
@@ -192,6 +194,7 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
       const existing = await findActiveCollectionByName(tx, current.teamId, input.name, id);
       if (existing) throw collectionNameConflictError(input.name, existing.id);
 
+      await recordTreeSnapshot(tx, id, actorId);
       await recordCollectionVersion(tx, id, { name: current.name, description: current.description, auth: current.authConfig }, actorId);
       const changes = {
         name: input.name,
@@ -227,7 +230,8 @@ export function updateCollection(db: AppDatabase, id: string, input: UpdateColle
 /** Moves a collection and all of its active items to Trash as one restorable root. */
 export function trashCollection(db: AppDatabase, id: string, actorId: string): Promise<{ id: string; deletedAt: string }> {
   return db.transaction(async (tx) => {
-      const current = await requireActiveCollection(tx, id);
+      const current = await lockActiveCollection(tx, id);
+      await recordTreeSnapshot(tx, id, actorId);
       const timestamp = nowIso();
       await tx.update(items)
         .set({ deletedAt: timestamp, trashRootId: id, updatedAt: timestamp, updatedBy: actorId })

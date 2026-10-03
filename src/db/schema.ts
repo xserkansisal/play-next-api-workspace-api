@@ -208,6 +208,52 @@ export const collectionVersions = mysqlTable(
   (t) => [index("collection_versions_collection_created_idx").on(t.collectionId, t.createdAt)],
 );
 
+export type CollectionTreeSnapshotNode =
+  | {
+      id: string;
+      type: "folder";
+      name: string;
+      description: string;
+      auth: ScopedAuth | null;
+      items: CollectionTreeSnapshotNode[];
+    }
+  | {
+      id: string;
+      type: "request";
+      name: string;
+      description: string;
+      method: RequestItemFields["method"];
+      url: string;
+      queryParams: Array<{ key: string; value: string; description: string; enabled: boolean }>;
+      headers: Array<{ key: string; value: string; description: string; enabled: boolean }>;
+      body: { type: "json" | "form-urlencoded" | "multipart" | "raw" | "graphql"; content: string } | null;
+      auth: RequestAuth;
+      preRequestScript: string;
+      postResponseScript: string;
+    };
+
+export interface CollectionTreeSnapshot {
+  name: string;
+  description: string;
+  auth: ScopedAuth | null;
+  items: CollectionTreeSnapshotNode[];
+}
+
+export const collectionTreeVersions = mysqlTable(
+  "collection_tree_versions",
+  {
+    id: id("id").primaryKey(),
+    collectionId: id("collection_id")
+      .notNull()
+      .references(() => collections.id),
+    snapshot: json("snapshot").$type<CollectionTreeSnapshot>().notNull(),
+    itemCount: int("item_count").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    createdBy: id("created_by").references(() => users.id),
+  },
+  (t) => [index("collection_tree_versions_collection_created_idx").on(t.collectionId, t.createdAt)],
+);
+
 export const items = mysqlTable(
   "items",
   {

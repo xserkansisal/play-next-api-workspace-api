@@ -30,6 +30,7 @@ import { copyNameAsync } from "./copyName.js";
 import { readItem } from "./items.js";
 import { activeSubtreeIds, findActiveItem, findActiveSiblingFolder, type DbExecutor, type ItemNode } from "./tree.js";
 import { recordActivity } from "./activity.js";
+import { recordTreeSnapshot } from "./versions.js";
 
 type ItemRow = typeof items.$inferSelect;
 
@@ -204,6 +205,10 @@ async function siblingNameTaken(db: DbExecutor, collectionId: string, parentId: 
  */
 export function cloneItem(db: AppDatabase, collectionId: string, itemId: string, actorId: string): Promise<ItemNode> {
   return db.transaction(async (tx) => {
+    await tx.select({ id: collections.id })
+      .from(collections)
+      .where(and(eq(collections.id, collectionId), isNull(collections.deletedAt)))
+      .for("update");
     const collection = await requireActiveCollection(tx, collectionId);
     const source = await findActiveItem(tx, collectionId, itemId);
     if (!source) throw new NotFoundError(`Item ${itemId} not found in collection ${collectionId}`);
@@ -222,6 +227,7 @@ export function cloneItem(db: AppDatabase, collectionId: string, itemId: string,
     ).flat();
 
     const timestamp = nowIso();
+    await recordTreeSnapshot(tx, collectionId, actorId);
     const newIds = await copySubtree(
       tx,
       rows,
