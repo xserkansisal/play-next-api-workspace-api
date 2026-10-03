@@ -3,6 +3,7 @@ import { createPool, type Pool, type RowDataPacket } from "mysql2/promise";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
 import type { Env } from "../config/env.js";
+import { migrateEnvironmentValues } from "./environmentValueMigration.js";
 import * as schema from "./schema.js";
 
 export type AppDatabase = MySql2Database<typeof schema> & { $client: Pool };
@@ -55,7 +56,7 @@ export async function openDatabase(env: Env, options: OpenDatabaseOptions = {}):
     assertSupportedServer(server.version, server.collation);
 
     const db = drizzle(pool, { schema, mode: "default" }) as AppDatabase;
-    if (options.migrate ?? true) await runMigrations(db);
+    if (options.migrate ?? true) await runMigrations(db, env.ENCRYPTION_KEY, env.ENCRYPTION_KEY_PREVIOUS);
     return db;
   } catch (error) {
     await pool.end();
@@ -63,8 +64,9 @@ export async function openDatabase(env: Env, options: OpenDatabaseOptions = {}):
   }
 }
 
-export async function runMigrations(db: AppDatabase): Promise<void> {
+export async function runMigrations(db: AppDatabase, encryptionKey: string, previousKey?: string): Promise<void> {
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  await migrateEnvironmentValues(db, encryptionKey, previousKey);
 }
 
 export async function closeDatabase(db: AppDatabase): Promise<void> {

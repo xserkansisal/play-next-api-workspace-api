@@ -1,6 +1,5 @@
 import type { RequestAuth, ScopedAuth } from "../validation/schemas.js";
-
-const SENSITIVE_KEY = /(?:token|secret|password|api[-_]?key|authorization|credential|cookie)/i;
+import { isSensitiveVariableKey } from "./secretValues.js";
 
 export interface SensitiveRedaction<T> {
   value: T;
@@ -23,7 +22,7 @@ export function redactSensitiveUrl(value: string): SensitiveRedaction<string> {
       } catch {
         // Preserve malformed query keys verbatim; they cannot be reliably classified.
       }
-      if (!/(?:token|secret|password|api[-_]?key|authorization|credential|cookie)/i.test(key)) return parameter;
+      if (!isSensitiveVariableKey(key)) return parameter;
       changed = true;
       return `${rawKey}={{${key}}}`;
     }).join("&");
@@ -72,7 +71,7 @@ export function redactSensitiveJson(value: unknown): SensitiveRedaction<unknown>
   let redacted = false;
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (SENSITIVE_KEY.test(key)) {
+    if (isSensitiveVariableKey(key)) {
       output[key] = `{{${key}}}`;
       redacted = true;
     } else {

@@ -28,6 +28,7 @@ describe("choosing an email sender", () => {
     const env = loadEnv({
       NODE_ENV: "production",
       AUTH_CODE_PEPPER: "a-production-pepper-that-is-long-enough-to-pass",
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
       MYSQL_PASSWORD: "test-password",
       ...smtp,
     });

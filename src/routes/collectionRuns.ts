@@ -40,6 +40,8 @@ export function createCollectionRunsRouter(
       authenticatedUserId(req),
       collectionRunSchema.parse(req.body),
       proxyOptions,
+      env.ENCRYPTION_KEY,
+      env.ENCRYPTION_KEY_PREVIOUS,
     );
     res.status(201).json(run);
   });
@@ -51,6 +53,8 @@ export function createCollectionRunsRouter(
       authenticatedUserId(req),
       collectionRunSchema.parse(req.body),
       proxyOptions,
+      env.ENCRYPTION_KEY,
+      env.ENCRYPTION_KEY_PREVIOUS,
       idSchema.parse(req.params.itemId),
     );
     res.status(201).json(run);

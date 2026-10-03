@@ -169,6 +169,20 @@
       "when": 1791019646974,
       "tag": "0023_white_jigsaw",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1791023982539,
+      "tag": "0024_encrypt_environment_variables",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1791038626964,
+      "tag": "0025_long_pestilence",
+      "breakpoints": true
     }
   ]
 }

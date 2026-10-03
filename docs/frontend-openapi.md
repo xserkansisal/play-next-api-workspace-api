@@ -83,7 +83,8 @@ round-trip imports. Duplicate requests that would map to the same OpenAPI path a
 The preview links nothing by itself. It reports `add`, `adopt`, `update`, `move`, `local-edit`,
 `conflict`, `delete`, `delete-conflict`, and `missing` changes with a `previewToken`. Adoption
 candidates are untracked requests with the same method and path. Sensitive values are redacted in
-the preview.
+the preview. Tracked operations also include `contractChanged: true` and `"responses"` in
+`changedFields` when their response definitions or shared component schemas change.
 
 `POST /api/v1/collections/:collectionId/sync/openapi/apply`
 
@@ -114,4 +115,6 @@ own name, description and auth unchanged. Tracked requests follow the source fol
 tag, or static path segments for untagged operations); empty old folders are retained. Existing
 folder auth settings are preserved, while newly created folders use the source extension auth
 settings. Local request-field edits are preserved as `local-edit`; overlapping source and local
-edits require an explicit conflict choice.
+edits require an explicit conflict choice. Once applied, the runner validates tracked responses
+against the source's documented status codes, media types, and schemas. Collections linked before
+response-contract storage was added gain response validation the next time the source is applied.

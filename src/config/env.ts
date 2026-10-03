@@ -57,6 +57,15 @@ const baseEnvSchema = z.object({
   SSE_HEARTBEAT_MS: z.coerce.number().int().min(1000).max(300_000).default(15_000),
   SSE_RETRY_MS: z.coerce.number().int().min(100).max(300_000).default(3_000),
   AUTH_CODE_PEPPER: z.string().min(32).default("local-development-only-pepper-not-for-production"),
+  ENCRYPTION_KEY: z.string()
+    .regex(/^[A-Za-z0-9_-]{43}$/, "must be a base64url-encoded 32-byte key")
+    .refine((value) => Buffer.from(value, "base64url").toString("base64url") === value, "must be canonical base64url")
+    .default("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+  ENCRYPTION_KEY_PREVIOUS: optionalStringEnv(
+    z.string()
+      .regex(/^[A-Za-z0-9_-]{43}$/, "must be a base64url-encoded 32-byte key")
+      .refine((value) => Buffer.from(value, "base64url").toString("base64url") === value, "must be canonical base64url"),
+  ),
   AUTH_CODE_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
   AUTH_CODE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
   AUTH_CODE_REQUEST_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
@@ -118,6 +127,21 @@ const envSchema = baseEnvSchema.superRefine((env, ctx) => {
   if (env.NODE_ENV === "production") {
     if (!env.MYSQL_PASSWORD) {
       ctx.addIssue({ code: "custom", path: ["MYSQL_PASSWORD"], message: "is required in production" });
+    }
+    if (env.ENCRYPTION_KEY === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" ||
+        new Set(env.ENCRYPTION_KEY).size < 16) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ENCRYPTION_KEY"],
+        message: "must be generated randomly for this deployment",
+      });
+    }
+    if (env.ENCRYPTION_KEY_PREVIOUS === env.ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ENCRYPTION_KEY_PREVIOUS"],
+        message: "must differ from ENCRYPTION_KEY",
+      });
     }
     if (PUBLISHED_PEPPERS.has(env.AUTH_CODE_PEPPER)) {
       ctx.addIssue({

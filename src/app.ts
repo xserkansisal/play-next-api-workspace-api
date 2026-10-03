@@ -101,9 +101,9 @@ export function createApp({
   app.use("/api/v1/presence", requireAuth, requireTeam, createPresenceRouter(db, presence));
   app.use("/api/v1/collections", requireAuth, requireTeam, collectionsEditor, createCollectionRunsRouter(db, env));
   app.use("/api/v1/collections", requireAuth, requireTeam, collectionsEditor, createCollectionsRouter(db, events, collectionsOptions));
-  app.use("/api/v1/environments", requireAuth, requireTeam, contentEditor, createEnvironmentsRouter(db, events));
+  app.use("/api/v1/environments", requireAuth, requireTeam, contentEditor, createEnvironmentsRouter(db, events, env));
   app.use("/api/v1/variables", requireAuth, requireTeam, variablesEditor, createVariablesRouter(db, events));
-  app.use("/api/v1/trash", requireAuth, requireTeam, contentEditor, createTrashRouter(db, events));
+  app.use("/api/v1/trash", requireAuth, requireTeam, contentEditor, createTrashRouter(db, events, env));
   app.use("/api/v1/proxy", requireAuth, createProxyRouter(env));
   app.use("/api/v1/teams", requireAuth, createTeamsRouter(db, { events, presence, corsOrigin: env.CORS_ORIGIN }));
   app.use("/api/v1/activity", requireAuth, requireTeam, createActivityRouter(db));

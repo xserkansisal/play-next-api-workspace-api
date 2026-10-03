@@ -228,6 +228,8 @@ export function restoreFromTrash(
   id: string,
   input: RestoreInput,
   actorId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
 ): Promise<RestoreOutcome> {
   return db.transaction(async (tx) => {
       const root = await findTrashRoot(tx, teamId, id);
@@ -279,7 +281,13 @@ export function restoreFromTrash(
           details: { nameChanged: name !== undefined && name !== root.row.name },
           createdAt: timestamp,
         });
-        return { resource: { kind: "environment", environment: await readEnvironment(tx, id) }, restoredAt: timestamp };
+        return {
+          resource: {
+            kind: "environment",
+            environment: await readEnvironment(tx, id, encryptionKey, previousEncryptionKey),
+          },
+          restoredAt: timestamp,
+        };
       }
 
       if (root.kind === "collection") {

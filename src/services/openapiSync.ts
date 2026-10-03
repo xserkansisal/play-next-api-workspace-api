@@ -31,6 +31,7 @@ type SyncChangeKind =
 export interface OpenApiSyncChange {
   key: string;
   kind: SyncChangeKind;
+  contractChanged?: boolean;
   recreatable?: boolean;
   operationId?: string;
   method: RequestItemFields["method"];
@@ -153,10 +154,12 @@ function specHash(conversion: OpenApiConversion): string {
   return sha256(stable({
     title: conversion.name,
     version: conversion.sourceVersion,
+    componentSchemas: conversion.componentSchemas,
     operations: conversion.operations.map((operation) => ({
       key: operationKey(operation),
       path: operation.path,
       fields: operation.fields,
+      responses: operation.responses,
       folderPath: operation.folderPath,
       folderAuth: operation.folderAuth,
       folderDescriptions: operation.folderDescriptions,
@@ -343,6 +346,16 @@ async function updateSyncSource(
     specHash: specHash(conversion),
     specTitle: conversion.name,
     specVersion: conversion.sourceVersion,
+    sourceSpec: {
+      openapiVersion: conversion.sourceVersion,
+      componentsSchemas: conversion.componentSchemas,
+      operations: conversion.operations.map((operation) => ({
+        operationId: operation.operationId,
+        method: operation.method,
+        path: sourcePath(operation),
+        responses: operation.responses,
+      })),
+    },
     syncedAt: timestamp,
     updatedBy: actorId,
   };
@@ -404,6 +417,19 @@ async function buildPlan(db: DbExecutor, collectionId: string, conversion: OpenA
       }
       const before = snapshot(current);
       const baseline = tracked.sourceSnapshot;
+      const previousContract = syncSource?.sourceSpec?.operations.find((candidate) =>
+        operation.operationId
+          ? candidate.operationId === operation.operationId
+          : candidate.method === operation.method && routeKey(candidate.method, candidate.path) === routeKey(operation.method, sourcePath(operation)));
+      const contractChanged = syncSource?.sourceSpec
+        ? stable({
+            componentsSchemas: syncSource.sourceSpec.componentsSchemas,
+            responses: previousContract?.responses ?? {},
+          }) !== stable({
+            componentsSchemas: conversion.componentSchemas,
+            responses: operation.responses,
+          })
+        : Object.keys(operation.responses).length > 0;
       const sourceChanged = stable(baseline) !== stable(operation.fields);
       const localChanged = stable(baseline) !== stable(before);
       const needsMove = !sameFolderPath(folderPathByRequestId.get(current.id) ?? [], operation.folderPath);
@@ -425,9 +451,10 @@ async function buildPlan(db: DbExecutor, collectionId: string, conversion: OpenA
         method: operation.method,
         path: sourcePath(operation),
         itemId: current.id,
+        ...(contractChanged ? { contractChanged: true } : {}),
         changedFields: kind === "local-edit"
-          ? changedFields(baseline, before)
-          : fieldsChanged,
+          ? [...changedFields(baseline, before), ...(contractChanged ? ["responses"] : [])]
+          : [...fieldsChanged, ...(contractChanged ? ["responses"] : [])],
         ...(kind === "update" || kind === "conflict"
           ? { before: previewFields(before), after: previewFields(operation.fields) }
           : {}),

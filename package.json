@@ -23,6 +23,7 @@
     "mail:check": "tsx --env-file-if-exists=.env src/auth/checkSmtp.ts"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "drizzle-orm": "^0.45.3",
     "express": "^5.2.1",
     "multer": "^2.4.0",

@@ -1,0 +1,1 @@
+ALTER TABLE `openapi_syncs` ADD `source_spec` json;

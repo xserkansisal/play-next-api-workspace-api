@@ -2,6 +2,8 @@
 
 This guide describes the frontend flows supported by the API. The server-side format, conversion
 rules, and OpenAPI limitations are documented in [frontend-openapi.md](frontend-openapi.md).
+The frontend runner integration for synchronized response contracts is documented in
+[frontend-contract-testing.md](frontend-contract-testing.md).
 
 All routes below use the normal signed-in API client and selected team context. They are available
 to collection editors; read-only team members cannot apply imports or sync changes. OpenAPI request
@@ -143,6 +145,7 @@ interface OpenApiSyncChange {
     | "delete"
     | "delete-conflict"
     | "missing";
+  contractChanged?: boolean;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   operationId?: string;
@@ -160,6 +163,9 @@ interface OpenApiSyncChange {
 `key` is `operationId:<operationId>` when a spec operation has an `operationId`; otherwise it is
 `route:<METHOD>:<path>`. Use this key in `adopt`, `conflicts`, and `recreate` maps/lists. A preview
 token is opaque to the frontend.
+
+When `contractChanged` is true, the operation's response definition or shared component schemas
+changed. Show this as informational contract-change metadata; no additional apply choice is needed.
 
 Change meanings and required UI handling:
 

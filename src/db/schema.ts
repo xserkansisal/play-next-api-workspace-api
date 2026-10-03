@@ -16,6 +16,7 @@ import {
   text,
 } from "drizzle-orm/mysql-core";
 import type { RequestAuth, RequestItemFields, ScopedAuth } from "../validation/schemas.js";
+import type { OpenApiContractDocument } from "../services/openapiContracts.js";
 
 // Keep text comparisons byte-exact by creating the database with utf8mb4_0900_bin.
 // Timestamps remain ISO-8601 UTC strings so the API's ordering/comparison semantics do not change.
@@ -334,6 +335,7 @@ export const openapiSyncs = mysqlTable("openapi_syncs", {
   specHash: varchar("spec_hash", { length: 64 }).notNull(),
   specTitle: varchar("spec_title", { length: 200 }).notNull(),
   specVersion: varchar("spec_version", { length: 100 }).notNull(),
+  sourceSpec: json("source_spec").$type<OpenApiContractDocument | null>(),
   syncedAt: timestamp("synced_at").notNull(),
   updatedBy: id("updated_by").references(() => users.id),
 });
@@ -443,7 +445,14 @@ export const testRunResults = mysqlTable(
     responsePreview: text("response_preview"),
     responseTruncated: boolean("response_truncated").notNull().default(false),
     assertions: json("assertions")
-      .$type<Array<{ name: string; passed: boolean; errorCode?: string }>>()
+      .$type<Array<{
+        name: string;
+        passed: boolean;
+        errorCode?: string;
+        path?: string;
+        expected?: string;
+        actual?: string;
+      }>>()
       .notNull(),
     errorCode: varchar("error_code", { length: 64 }),
   },
@@ -511,6 +520,8 @@ export const environmentVariables = mysqlTable(
       sql`CASE WHEN ${sql.identifier("enabled")} = 1 THEN ${sql.identifier("key")} ELSE NULL END`,
       { mode: "virtual" },
     ),
+    isSecret: boolean("is_secret").notNull().default(false),
+    valueEncryptionVersion: int("value_encryption_version"),
     value: mediumtext("value").notNull(),
   },
   (t) => [

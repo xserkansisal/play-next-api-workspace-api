@@ -1,6 +1,7 @@
 import type { RequestAuth, ScopedAuth } from "../validation/schemas.js";
 import { BadRequestError } from "../errors.js";
 import { redactRequestAuth, redactScopedAuth, redactSensitiveJsonText } from "./openapiValues.js";
+import { isSensitiveVariableKey } from "./secretValues.js";
 import type { CollectionAggregate } from "./collections.js";
 import type { FolderNode, ItemNode, RequestNode } from "./tree.js";
 
@@ -65,7 +66,7 @@ function parameterRows(
   values: Array<{ key: string; value: string; description?: string; enabled?: boolean }>,
 ): OpenApiParameter[] {
   return values.map((row) => {
-    const sensitive = /(?:token|secret|password|api[-_]?key|authorization|credential|cookie)/i.test(row.key);
+    const sensitive = isSensitiveVariableKey(row.key);
     return {
       name: row.key,
       in: location,

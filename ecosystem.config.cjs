@@ -40,6 +40,8 @@ module.exports = {
         SSE_HEARTBEAT_MS: process.env.SSE_HEARTBEAT_MS || "15000",
         SSE_RETRY_MS: process.env.SSE_RETRY_MS || "3000",
         AUTH_CODE_PEPPER: required("AUTH_CODE_PEPPER"),
+        ENCRYPTION_KEY: required("ENCRYPTION_KEY"),
+        ENCRYPTION_KEY_PREVIOUS: process.env.ENCRYPTION_KEY_PREVIOUS || "",
         AUTH_CODE_TTL_SECONDS: process.env.AUTH_CODE_TTL_SECONDS || "900",
         AUTH_CODE_MAX_ATTEMPTS: process.env.AUTH_CODE_MAX_ATTEMPTS || "5",
         AUTH_CODE_REQUEST_LIMIT: process.env.AUTH_CODE_REQUEST_LIMIT || "3",

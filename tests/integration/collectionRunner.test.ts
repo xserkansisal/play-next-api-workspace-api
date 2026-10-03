@@ -100,6 +100,102 @@ pm.test("uses the captured token", () => pm.expect(pm.response.json().receivedHe
     await anotherUser.get(`/api/v1/collections/${collection.id}/runs/${run.id}`).expect(404);
   });
 
+  it("uses environment secrets while redacting them from persisted response previews", async () => {
+    ctx = await createTestContext(":memory:", {
+      env: { PROXY_ALLOWED_HOSTS: `127.0.0.1:${upstreamPort}` },
+    });
+    const secret = "runner-secret-should-not-appear";
+    const environment = (await ctx.api.post("/api/v1/environments").send({
+      name: "Runner secrets",
+      variables: [{ key: "accessToken", value: secret, isSecret: true }],
+    }).expect(201)).body;
+    const collection = (await ctx.api.post("/api/v1/collections").send({
+      name: "Secret preview",
+      items: [{
+        type: "request",
+        name: "Echo secret",
+        method: "GET",
+        url: target("/echo/{{accessToken}}"),
+      }],
+    }).expect(201)).body;
+
+    const run = (await ctx.api.post(`/api/v1/collections/${collection.id}/run`)
+      .send({ environmentId: environment.id })
+      .expect(201)).body;
+    expect(run.results[0].responsePreview).toContain("[REDACTED]");
+    expect(run.results[0].responsePreview).not.toContain(secret);
+  });
+
+  it("validates synchronized OpenAPI status and response schemas during collection runs", async () => {
+    ctx = await createTestContext(":memory:", {
+      env: { PROXY_ALLOWED_HOSTS: `127.0.0.1:${upstreamPort}` },
+    });
+    const collection = (await ctx.api.post("/api/v1/collections").send({ name: "Contract checks" }).expect(201)).body;
+    const spec = {
+      openapi: "3.1.0",
+      info: { title: "Contract checks" },
+      servers: [{ url: target("") }],
+      components: {
+        schemas: {
+          LoginResponse: {
+            type: "object",
+            required: ["token"],
+            properties: { token: { type: "string" } },
+          },
+          EchoResponse: {
+            type: "object",
+            required: ["receivedHeader"],
+            properties: { receivedHeader: { type: "string" } },
+          },
+        },
+      },
+      paths: {
+        "/login": {
+          get: {
+            operationId: "login",
+            responses: {
+              "2XX": {
+                description: "Login response",
+                content: { "application/json": { schema: { $ref: "#/components/schemas/LoginResponse" } } },
+              },
+            },
+          },
+        },
+        "/echo": {
+          get: {
+            operationId: "echo",
+            responses: {
+              "200": {
+                description: "Echo response",
+                content: { "application/json": { schema: { $ref: "#/components/schemas/EchoResponse" } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const preview = await ctx.api
+      .post(`/api/v1/collections/${collection.id}/sync/openapi/preview`)
+      .send({ spec })
+      .expect(200);
+    await ctx.api
+      .post(`/api/v1/collections/${collection.id}/sync/openapi/apply`)
+      .send({ spec, previewToken: preview.body.previewToken })
+      .expect(200);
+
+    const run = (await ctx.api.post(`/api/v1/collections/${collection.id}/run`).send({}).expect(201)).body;
+    expect(run.status).toBe("failed");
+    expect(run.results).toMatchObject([
+      { itemName: "echo", status: "failed", assertions: [{
+        errorCode: "CONTRACT_SCHEMA_MISMATCH",
+        path: "$.receivedHeader",
+        expected: "string",
+        actual: "null",
+      }] },
+      { itemName: "login", status: "passed", assertions: [] },
+    ]);
+  });
+
   it("runs only the selected folder and returns proxy failures as stored request results", async () => {
     ctx = await createTestContext(":memory:", {
       env: { PROXY_ALLOWED_HOSTS: `127.0.0.1:${upstreamPort}` },

@@ -1,5 +1,8 @@
 # Collection test runner: frontend integration
 
+For the OpenAPI sync flow, contract assertion types, error rendering, and response-validation
+limitations, see [frontend-contract-testing.md](frontend-contract-testing.md).
+
 The API can run every saved request in a collection, or every request under one folder, in the
 collection tree's displayed order. A run is synchronous: the response contains the completed run
 and its per-request results. All runner and history routes require the signed-in session.
@@ -133,7 +136,15 @@ requests are recorded as `skipped` with `RUN_TIMEOUT`.
       "responsePreview": "{\"id\":\"record-1\"}",
       "responseTruncated": false,
       "assertions": [
-        { "name": "id exists", "passed": false, "errorCode": "ASSERTION_FAILED" }
+        { "name": "id exists", "passed": false, "errorCode": "ASSERTION_FAILED" },
+        {
+          "name": "OpenAPI response body schema",
+          "passed": false,
+          "errorCode": "CONTRACT_SCHEMA_MISMATCH",
+          "path": "$.id",
+          "expected": "string",
+          "actual": "integer"
+        }
       ],
       "errorCode": null
     }
@@ -148,6 +159,15 @@ but not proxy exception details. Common codes include `SCRIPT_TIMEOUT`, `SCRIPT_
 `RUN_VARIABLE_NOT_FOUND`, `PROXY_DISABLED`, `PROXY_HOST_NOT_ALLOWED`, `PROXY_TIMEOUT`, and
 `PROXY_REQUEST_FAILED`. An upstream `4xx` or `5xx` alone does not fail a request; add a `pm.test`
 status assertion when that is expected.
+
+When a collection has an applied OpenAPI sync source, the runner also validates each tracked
+request's response status, content type, and declared response-body schema. Exact status codes,
+status ranges such as `2XX`, and `default` are supported. Schema failures are stored as failed
+assertions with a stable `CONTRACT_*` `errorCode` and safe diagnostics such as `path`, `expected`,
+and `actual`; response values are never included. Truncated bodies, invalid JSON, and undocumented
+status/content types are reported as contract failures. Requests not tracked to an applied OpenAPI
+operation are unaffected. Existing sync links begin providing response contracts after the spec is
+applied again.
 
 The result stores no resolved URL, request headers, request body, authentication values, or final
 captured variables. It does store up to 16 KiB of each upstream response body as `responsePreview`

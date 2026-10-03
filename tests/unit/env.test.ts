@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import { EnvValidationError, loadEnv } from "../../src/config/env.js";
 
+const TEST_ENCRYPTION_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY";
+
 describe("loadEnv", () => {
   it("applies defaults when variables are missing", () => {
     expect(loadEnv({})).toEqual({
@@ -17,6 +19,7 @@ describe("loadEnv", () => {
       SSE_HEARTBEAT_MS: 15000,
       SSE_RETRY_MS: 3000,
       AUTH_CODE_PEPPER: "local-development-only-pepper-not-for-production",
+      ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       AUTH_CODE_TTL_SECONDS: 900,
       AUTH_CODE_MAX_ATTEMPTS: 5,
       AUTH_CODE_REQUEST_LIMIT: 3,
@@ -39,6 +42,7 @@ describe("loadEnv", () => {
       HOST: "127.0.0.1",
       PORT: "8080",
       AUTH_CODE_PEPPER: "this-is-a-test-secret-pepper-123456",
+      ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
       MYSQL_PASSWORD: "test-password",
@@ -69,6 +73,7 @@ describe("loadEnv", () => {
       NODE_ENV: "production",
       PRESENCE_SIMULATOR_ENABLED: "true",
       AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
+      ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       MYSQL_PASSWORD: "test-password",
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
@@ -81,6 +86,7 @@ describe("loadEnv", () => {
     expect(loadEnv({
       NODE_ENV: "production",
       AUTH_CODE_PEPPER: "a-real-random-pepper-value-1234567890",
+      ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       MYSQL_PASSWORD: "test-password",
       SMTP_HOST: "smtp.test.local",
       SMTP_FROM: "sender@sisal.com",
@@ -144,6 +150,7 @@ describe("loadEnv", () => {
       SMTP_FROM: "sender@sisal.com",
       MYSQL_PASSWORD: "test-password",
       AUTH_CODE_PEPPER: pepper,
+      ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     });
 
     // Each of these has been printed in this repository as an example, so it is public knowledge.
@@ -172,6 +179,31 @@ describe("loadEnv", () => {
     it("accepts a randomly generated pepper", () => {
       const pepper = randomBytes(32).toString("base64url");
       expect(loadEnv(productionEnv(pepper))).toMatchObject({ AUTH_CODE_PEPPER: pepper });
+    });
+  });
+
+  describe("ENCRYPTION_KEY in production", () => {
+    const productionEnv = (encryptionKey: string, previousKey?: string) => ({
+      NODE_ENV: "production",
+      SMTP_HOST: "smtp.test.local",
+      SMTP_FROM: "sender@sisal.com",
+      MYSQL_PASSWORD: "test-password",
+      AUTH_CODE_PEPPER: "a-valid-randomized-test-pepper-123456",
+      ENCRYPTION_KEY: encryptionKey,
+      ...(previousKey ? { ENCRYPTION_KEY_PREVIOUS: previousKey } : {}),
+    });
+
+    it("rejects the local placeholder and low-diversity keys", () => {
+      expect(() => loadEnv({ ...productionEnv("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") }))
+        .toThrow(EnvValidationError);
+      expect(() => loadEnv(productionEnv("A".repeat(43)))).toThrow(EnvValidationError);
+    });
+
+    it("accepts a random key and requires a distinct previous rotation key", () => {
+      const current = randomBytes(32).toString("base64url");
+      const previous = randomBytes(32).toString("base64url");
+      expect(loadEnv(productionEnv(current, previous)).ENCRYPTION_KEY_PREVIOUS).toBe(previous);
+      expect(() => loadEnv(productionEnv(current, current))).toThrow(EnvValidationError);
     });
   });
 });

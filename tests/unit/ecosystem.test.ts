@@ -27,6 +27,7 @@ const REQUIRED = {
   MYSQL_PASSWORD: "test-password",
   MYSQL_DATABASE: "play_next_api",
   AUTH_CODE_PEPPER: "a-pepper-long-enough-for-the-schema-00000",
+  ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
 };
 
 // The config pins NODE_ENV=production, and production also insists on a configured mail sender.
@@ -59,6 +60,7 @@ describe("PM2 ecosystem configuration", () => {
       SSE_HEARTBEAT_MS: "15000",
       SSE_RETRY_MS: "3000",
       AUTH_CODE_TTL_SECONDS: "900",
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
       AUTH_CODE_MAX_ATTEMPTS: "5",
       AUTH_CODE_REQUEST_LIMIT: "3",
       AUTH_CODE_REQUEST_WINDOW_SECONDS: "900",

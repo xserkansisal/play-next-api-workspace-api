@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestContext, type TestContext } from "../helpers.js";
+import { loadEnv } from "../../src/config/env.js";
+import { runMigrations } from "../../src/db/client.js";
+import { environmentVariables } from "../../src/db/schema.js";
+import { createTestContext, queryRows, type TestContext } from "../helpers.js";
 
 let ctx: TestContext;
 beforeEach(async () => {
@@ -22,8 +25,8 @@ describe("environments API", () => {
     expect(created.body).toMatchObject({
       name: "Development",
       variables: [
-        { key: "port", value: "8443", enabled: true },
-        { key: "baseUrl", value: "https://dev.example.internal", enabled: false },
+        { key: "port", value: "8443", enabled: true, isSecret: false },
+        { key: "baseUrl", value: "https://dev.example.internal", enabled: false, isSecret: false },
       ],
     });
     const staging = await ctx.api.post("/api/v1/environments").send({ name: "a-staging" }).expect(201);
@@ -35,7 +38,7 @@ describe("environments API", () => {
       .put(`/api/v1/environments/${created.body.id}`)
       .send({ name: "Dev", variables: [{ key: "baseUrl", value: "http://localhost" }] })
       .expect(200);
-    expect(saved.body.variables).toEqual([{ key: "baseUrl", value: "http://localhost", enabled: true }]);
+    expect(saved.body.variables).toEqual([{ key: "baseUrl", value: "http://localhost", enabled: true, isSecret: false }]);
 
     const read = await ctx.api.get(`/api/v1/environments/${created.body.id}`).expect(200);
     expect(read.body).toEqual(saved.body);
@@ -104,11 +107,11 @@ describe("environments API", () => {
     }).expect(201);
 
     const added = await ctx.api.post(`/api/v1/environments/${env.body.id}/variables`)
-      .send({ key: "token", value: "new" })
+      .send({ key: "token", value: "new", isSecret: true })
       .expect(201);
     expect(added.body.variables).toEqual([
-      { key: "token", value: "old", enabled: false },
-      { key: "token", value: "new", enabled: true },
+      { key: "token", value: "old", enabled: false, isSecret: false },
+      { key: "token", value: "new", enabled: true, isSecret: true },
     ]);
 
     await ctx.api.post(`/api/v1/environments/${env.body.id}/variables`)
@@ -122,6 +125,49 @@ describe("environments API", () => {
     await ctx.api.post(`/api/v1/environments/00000000-0000-4000-8000-000000000000/variables`)
       .send({ key: "missing", value: "x" })
       .expect(404);
+  });
+
+  it("encrypts values at rest, migrates legacy plaintext, and preserves the secret flag", async () => {
+    const secret = "secret-environment-value";
+    const environment = await ctx.api.post("/api/v1/environments").send({
+      name: "Encrypted",
+      variables: [{ key: "ACCESS_TOKEN", value: secret, isSecret: true }],
+    }).expect(201);
+    const row = await queryRows(
+      ctx.db,
+      "SELECT value, value_encryption_version, is_secret FROM environment_variables WHERE environment_id = ?",
+      [environment.body.id],
+    );
+    expect(String(row[0]?.value)).not.toContain(secret);
+    expect(row[0]).toMatchObject({ value_encryption_version: 1, is_secret: 1 });
+    expect(environment.body.variables).toEqual([{
+      key: "ACCESS_TOKEN",
+      value: secret,
+      enabled: true,
+      isSecret: true,
+    }]);
+
+    await ctx.db.$client.query(
+      "UPDATE environment_variables SET value = ?, value_encryption_version = NULL WHERE environment_id = ?",
+      [secret, environment.body.id],
+    );
+    await runMigrations(ctx.db, loadEnv({ NODE_ENV: "test" }).ENCRYPTION_KEY);
+
+    const migrated = await queryRows(
+      ctx.db,
+      "SELECT value, value_encryption_version FROM environment_variables WHERE environment_id = ?",
+      [environment.body.id],
+    );
+    expect(String(migrated[0]?.value)).not.toContain(secret);
+    expect(migrated[0]?.value_encryption_version).toBe(1);
+    expect((await ctx.api.get(`/api/v1/environments/${environment.body.id}`).expect(200)).body.variables[0])
+      .toMatchObject({ value: secret, isSecret: true });
+
+    const copy = (await ctx.api.post(`/api/v1/environments/${environment.body.id}/clone`).expect(201)).body;
+    expect(copy.variables).toEqual(environment.body.variables);
+    await ctx.api.delete(`/api/v1/environments/${environment.body.id}`).expect(204);
+    const restored = await ctx.api.post(`/api/v1/trash/${environment.body.id}/restore`).expect(200);
+    expect(restored.body.environment.variables).toEqual(environment.body.variables);
   });
 
   it("moves an environment to Trash", async () => {

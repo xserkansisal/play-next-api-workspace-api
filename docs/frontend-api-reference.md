@@ -5,7 +5,8 @@ output and error codes. Source of truth is the backend code; where a behaviour i
 it is called out with **Note**.
 
 Related, more narrative docs: `frontend-authentication.md` (request auth + inheritance),
-`frontend-request-body-types.md`, `frontend-collection-runner.md`, `frontend-collection-snapshots.md`,
+`frontend-request-body-types.md`, `frontend-collection-runner.md`,
+`frontend-environment-secrets.md`, `frontend-collection-snapshots.md`,
 `frontend-version-history.md`,
 `frontend-teams.md`, `frontend-roles-and-email.md`, `frontend-session-cookie.md`,
 `frontend-dev-login.md`.
@@ -577,20 +578,24 @@ Variables are referenced as `{{key}}`; **frontend** substitutes them for proxy s
 ```ts
 type Environment = {
   id: string; name: string;
-  variables: { key: string; value: string; enabled: boolean }[];  // ordered
+  variables: { key: string; value: string; enabled: boolean; isSecret: boolean }[];  // ordered
   createdAt: string; updatedAt: string; createdBy: string | null; updatedBy: string | null;
 };
 ```
 Variable key: 1–256 chars, **no whitespace or `{}`**; value ≤ 65 536 chars. Max **1000** variables.
 Two **enabled** variables may not share a key (disabled duplicates are OK).
+`isSecret` defaults to `false`. All environment values are encrypted at rest; authorized environment
+read responses still contain the real value. Secret values and values with sensitive key names are
+redacted from saved collection-run response previews. Export/preview must not copy environment
+values into OpenAPI documents.
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |
 | GET | `/environments` | – | 200 `{ "environments": Environment[] }` |
-| POST | `/environments` | `{ name, variables?: [{key,value,enabled?}] }` | 201 `Environment` |
+| POST | `/environments` | `{ name, variables?: [{key,value,enabled?,isSecret?}] }` | 201 `Environment` |
 | GET | `/environments/:environmentId` | – | 200 `Environment` |
 | PUT | `/environments/:environmentId` | `{ name, variables?: [...] }` (**replaces all variables**) | 200 `Environment` |
-| POST | `/environments/:environmentId/variables` | `{ key, value, enabled?: true }` (appended) | 201 `Environment` |
+| POST | `/environments/:environmentId/variables` | `{ key, value, enabled?: true, isSecret?: false }` (appended) | 201 `Environment` |
 | POST | `/environments/:environmentId/clone` | – | 201 `Environment` (`"<name> (copy)"`) |
 | DELETE | `/environments/:environmentId` | – | 204 (to Trash) |
 

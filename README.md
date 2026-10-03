@@ -49,6 +49,8 @@ Environment variables are validated with Zod in `src/config/env.ts`:
 | `SSE_HEARTBEAT_MS` | `15000` | SSE heartbeat comment interval (1000–300000) |
 | `SSE_RETRY_MS` | `3000` | Reconnect delay advertised to SSE clients via `retry:` (100–300000) |
 | `AUTH_CODE_PEPPER` | development-only placeholder | HMAC key for sign-in codes; a six-digit code is exhaustible from a stolen hash without it. Generate per environment with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Production refuses example and repeated-character values. See [deployment.md](docs/deployment.md#sign-in-code-pepper) |
+| `ENCRYPTION_KEY` | development-only placeholder | Required strong 32-byte base64url key in production; AES-256-GCM encrypts all environment variable values at rest. Back up separately from MySQL. See [deployment.md](docs/deployment.md#environment-value-encryption) |
+| `ENCRYPTION_KEY_PREVIOUS` | unset | Temporary previous key for startup re-encryption during key rotation; remove after migration succeeds |
 | `AUTH_CODE_TTL_SECONDS` | `900` | Sign-in code lifetime (15 minutes by default; range 60–3600) |
 | `AUTH_CODE_MAX_ATTEMPTS` | `5` | Wrong attempts allowed per code before it is invalidated |
 | `AUTH_CODE_REQUEST_LIMIT` / `AUTH_CODE_REQUEST_WINDOW_SECONDS` | `3` / `900` | Code requests allowed per normalized email per window |
@@ -73,6 +75,11 @@ Shared data is stored in MySQL 8.0.16+ via [Drizzle ORM](https://orm.drizzle.tea
 with `utf8mb4_0900_bin` collation so normalized keys and identifiers retain exact comparisons.
 The schema lives in `src/db/schema.ts`; MySQL migrations in `drizzle-mysql/` are generated with
 `npm run db:generate` and committed.
+
+Environment values are stored as authenticated AES-256-GCM ciphertext using the deployment's
+`ENCRYPTION_KEY`, including values not marked secret. `isSecret` is metadata used to redact marked values from collection-run response previews; values
+with sensitive key names are also redacted. Authorized environment API responses continue to return
+the actual values.
 
 Normalized tables: `collections`, `items` (folders and requests as a recursive tree via
 `parent_id`), `request_details`, ordered `request_query_params` / `request_headers`,

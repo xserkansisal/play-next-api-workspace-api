@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Env } from "../config/env.js";
 import type { AppDatabase } from "../db/client.js";
 import type { ChangeEvent, ChangeEventHub } from "../events/hub.js";
 import { authenticatedUserId, requestTeamId } from "../middleware/authenticate.js";
@@ -16,7 +17,7 @@ function restoredEventTarget(resource: RestoredResource): Pick<ChangeEvent, "kin
   }
 }
 
-export function createTrashRouter(db: AppDatabase, events: ChangeEventHub): Router {
+export function createTrashRouter(db: AppDatabase, events: ChangeEventHub, env: Env): Router {
   const router = Router();
 
   router.get("/", async (req, res) => {
@@ -34,6 +35,8 @@ export function createTrashRouter(db: AppDatabase, events: ChangeEventHub): Rout
       req.params.id,
       restoreSchema.parse(req.body ?? {}),
       authenticatedUserId(req),
+      env.ENCRYPTION_KEY,
+      env.ENCRYPTION_KEY_PREVIOUS,
     );
     events.publish(requestTeamId(req), { ...restoredEventTarget(resource), operation: "restored", changedAt: restoredAt });
     res.json(resource);

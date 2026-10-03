@@ -7,6 +7,7 @@ import {
   redactSensitiveJsonText,
   redactSensitiveUrl,
 } from "./openapiValues.js";
+import { sanitizeOpenApiSchema, type OpenApiContractResponse } from "./openapiContracts.js";
 import {
   HTTP_METHODS,
   MAX_IMPORT_NODES,
@@ -39,6 +40,7 @@ export interface OpenApiConversion {
   name: string;
   description: string;
   sourceVersion: string;
+  componentSchemas: Record<string, unknown>;
   auth: ScopedAuth | null;
   items: TreeNodeInput[];
   operations: OpenApiOperation[];
@@ -51,6 +53,7 @@ export interface OpenApiOperation {
   path: string;
   requestPath: string;
   fields: RequestItemFields;
+  responses: Record<string, OpenApiContractResponse>;
   folderPath: string[];
   folderAuth: Array<ScopedAuth | null>;
   folderDescriptions: string[];
@@ -220,6 +223,20 @@ function bodyForOperation(root: JsonObject, operation: JsonObject, pathItem: Jso
     return { type, content: contentExample(root, mediaType, media, warnings, path, method) };
   }
   return null;
+}
+
+function responseContracts(root: JsonObject, operation: JsonObject): Record<string, OpenApiContractResponse> {
+  const responses = object(operation.responses);
+  return Object.fromEntries(Object.entries(responses).map(([status, rawResponse]) => {
+    const response = object(resolveRef(root, rawResponse));
+    const content = object(response.content);
+    return [status, {
+      content: Object.fromEntries(Object.entries(content).map(([mediaType, rawMedia]) => {
+        const media = object(rawMedia);
+        return [mediaType, Object.hasOwn(media, "schema") ? { schema: sanitizeOpenApiSchema(media.schema) } : {}];
+      })),
+    }];
+  }));
 }
 
 function pathParameters(root: JsonObject, pathItem: JsonObject, operation: JsonObject): unknown[] {
@@ -469,6 +486,7 @@ export function convertOpenApiSpec(input: CreateOpenApiCollectionInput["spec"]):
         path,
         requestPath: requestPath(request.url),
         fields: request,
+        responses: responseContracts(root, operation),
         folderPath: [...folderNames],
         folderAuth: folderNames.map((_, index) => scopedAuthSchema.nullable().parse(importedFolderAuth[index] ?? null)),
         folderDescriptions: folderNames.map((_, index) => typeof importedFolderDescriptions[index] === "string"
@@ -500,6 +518,7 @@ export function convertOpenApiSpec(input: CreateOpenApiCollectionInput["spec"]):
     name: text(info.title)?.trim() || "Imported OpenAPI",
     description: text(info.description) ?? "",
     sourceVersion: version,
+    componentSchemas: sanitizeOpenApiSchema(object(object(root.components).schemas)) as Record<string, unknown>,
     auth: collectionAuth,
     items,
     operations,

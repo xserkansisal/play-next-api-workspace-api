@@ -241,6 +241,7 @@ export const environmentVariableSchema = z.strictObject({
     .regex(/^[^\s{}]+$/, "Variable key must not contain whitespace or braces"),
   value: z.string().max(MAX_VARIABLE_VALUE_LENGTH),
   enabled: z.boolean().default(true),
+  isSecret: z.boolean().default(false),
 });
 
 // Scoped variables reuse the environment key rules: both are referenced as {{key}}, so a key that
@@ -264,6 +265,7 @@ export const environmentVariableCreateInputSchema = z.strictObject({
   key: variableKeySchema,
   value: z.string().max(MAX_VARIABLE_VALUE_LENGTH),
   enabled: z.boolean().default(true),
+  isSecret: z.boolean().default(false),
 });
 export type EnvironmentVariableCreateInput = z.output<typeof environmentVariableCreateInputSchema>;
 

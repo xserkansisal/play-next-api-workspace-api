@@ -1,6 +1,14 @@
 import { and, asc, count, desc, eq, isNull, or } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { environments, environmentVariables, testRunResults, testRuns, variables } from "../db/schema.js";
+import {
+  environments,
+  environmentVariables,
+  openapiSyncItems,
+  openapiSyncs,
+  testRunResults,
+  testRuns,
+  variables,
+} from "../db/schema.js";
 import { BadRequestError, HttpError, NotFoundError } from "../errors.js";
 import type { CollectionRunInput, RunHistoryQuery } from "../validation/schemas.js";
 import { MAX_RUN_REQUESTS } from "../validation/schemas.js";
@@ -18,6 +26,12 @@ import {
   type ScriptRequest,
   TestScriptError,
 } from "./testScripts.js";
+import { decryptEnvironmentValue, isSensitiveVariableKey, maskSecretValues } from "./secretValues.js";
+import {
+  createOpenApiContractValidator,
+  type OpenApiContractDocument,
+  type OpenApiOperationContract,
+} from "./openapiContracts.js";
 
 const MAX_RUN_DURATION_MS = 10 * 60_000;
 const MAX_VARIABLE_COUNT = 2_500;
@@ -26,10 +40,54 @@ const RESPONSE_PREVIEW_LENGTH = 16_384;
 
 type RunStatus = "running" | "passed" | "failed" | "error";
 type ResultStatus = "passed" | "failed" | "error" | "skipped";
-type AssertionResult = { name: string; passed: boolean; errorCode?: string };
+type AssertionResult = {
+  name: string;
+  passed: boolean;
+  errorCode?: string;
+  path?: string;
+  expected?: string;
+  actual?: string;
+};
 
 export interface RunnerProxyOptions extends ProxyOptions {
   maxRunDurationMs?: number;
+}
+
+async function loadRunContracts(
+  db: AppDatabase,
+  collectionId: string,
+): Promise<{
+  document: OpenApiContractDocument | null;
+  operationByItemId: Map<string, OpenApiOperationContract>;
+}> {
+  const [sync] = await db.select({ sourceSpec: openapiSyncs.sourceSpec })
+    .from(openapiSyncs)
+    .where(eq(openapiSyncs.collectionId, collectionId))
+    .limit(1);
+  if (!sync?.sourceSpec) return { document: null, operationByItemId: new Map() };
+  const tracked = await db.select({
+    itemId: openapiSyncItems.itemId,
+    operationId: openapiSyncItems.operationId,
+    method: openapiSyncItems.method,
+    path: openapiSyncItems.path,
+  })
+    .from(openapiSyncItems)
+    .where(eq(openapiSyncItems.collectionId, collectionId));
+  const operationByKey = new Map(sync.sourceSpec.operations.map((operation) => [
+    operation.operationId
+      ? `operationId:${operation.operationId}`
+      : `route:${operation.method}:${operation.path}`,
+    operation,
+  ]));
+  const operationByItemId = new Map<string, OpenApiOperationContract>();
+  for (const row of tracked) {
+    const key = row.operationId
+      ? `operationId:${row.operationId}`
+      : `route:${row.method}:${row.path}`;
+    const operation = operationByKey.get(key);
+    if (operation) operationByItemId.set(row.itemId, operation);
+  }
+  return { document: sync.sourceSpec, operationByItemId };
 }
 
 export interface RunResultSummary {
@@ -119,8 +177,15 @@ async function loadRunVariables(
   userId: string,
   teamId: string,
   environmentId: string | undefined,
-): Promise<Map<string, string>> {
-  let environmentRows: Array<{ key: string; value: string }> = [];
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<{ values: Map<string, string>; secretValues: string[] }> {
+  let environmentRows: Array<{
+    key: string;
+    value: string;
+    valueEncryptionVersion: number | null;
+    isSecret: boolean;
+  }> = [];
   if (environmentId) {
     const [environment] = await db
       .select({ id: environments.id })
@@ -129,7 +194,12 @@ async function loadRunVariables(
       .limit(1);
     if (!environment) throw new NotFoundError(`Environment ${environmentId} not found`);
     environmentRows = await db
-      .select({ key: environmentVariables.key, value: environmentVariables.value })
+      .select({
+        key: environmentVariables.key,
+        value: environmentVariables.value,
+        valueEncryptionVersion: environmentVariables.valueEncryptionVersion,
+        isSecret: environmentVariables.isSecret,
+      })
       .from(environmentVariables)
       .where(and(eq(environmentVariables.environmentId, environmentId), eq(environmentVariables.enabled, true)))
       .orderBy(asc(environmentVariables.position));
@@ -145,12 +215,22 @@ async function loadRunVariables(
   const map = new Map<string, string>();
   for (const row of scopedRows) if (row.scope === "global") map.set(row.key, row.value);
   for (const row of scopedRows) if (row.scope === "user") map.set(row.key, row.value);
-  for (const row of environmentRows) map.set(row.key, row.value);
+  const secretValues: string[] = [];
+  for (const row of environmentRows) {
+    const decrypted = decryptEnvironmentValue(
+      row.value,
+      row.valueEncryptionVersion,
+      encryptionKey,
+      previousEncryptionKey,
+    ).value;
+    map.set(row.key, decrypted);
+    if (row.isSecret || isSensitiveVariableKey(row.key)) secretValues.push(decrypted);
+  }
 
   if (map.size > MAX_VARIABLE_COUNT || Buffer.byteLength(JSON.stringify([...map])) > MAX_VARIABLE_BYTES) {
     throw new HttpError(422, "The effective variable set is too large for a collection run", "RUN_VARIABLES_TOO_LARGE");
   }
-  return map;
+  return { values: map, secretValues };
 }
 
 function replaceVariables(value: string, variables: Map<string, string>): string {
@@ -246,6 +326,9 @@ async function runOneRequest(
   variables: Map<string, string>,
   proxyOptions: RunnerProxyOptions,
   runDeadline: number,
+  secretValues: string[],
+  contract: OpenApiOperationContract | undefined,
+  validateContract: ReturnType<typeof createOpenApiContractValidator> | undefined,
 ): Promise<{
   status: ResultStatus;
   durationMs: number;
@@ -274,6 +357,7 @@ async function runOneRequest(
     const prepared = prepareProxyRequest(request, scriptRequest, variables);
     const timeoutMs = Math.max(1, Math.min(proxyOptions.timeoutMs, runDeadline - Date.now()));
     response = await executeProxyRequest(prepared, { ...proxyOptions, timeoutMs });
+    if (contract && validateContract) assertions.push(...validateContract(contract, response));
 
     if (request.postResponseScript !== "") {
       const postResponse = await executeTestScript(
@@ -284,12 +368,12 @@ async function runOneRequest(
           response: scriptResponseForResult(response),
         },
       );
-      assertions = postResponse.tests;
+      assertions.push(...postResponse.tests);
       variables.clear();
       for (const [key, value] of Object.entries(postResponse.variables)) variables.set(key, value);
     }
     const status: ResultStatus = assertions.some((assertion) => !assertion.passed) ? "failed" : "passed";
-    const preview = truncateUtf8(response.bodyText, RESPONSE_PREVIEW_LENGTH);
+    const preview = truncateUtf8(maskSecretValues(response.bodyText, secretValues), RESPONSE_PREVIEW_LENGTH);
     return {
       status,
       durationMs: Date.now() - startedAt,
@@ -302,10 +386,12 @@ async function runOneRequest(
     };
   } catch (error) {
     const code = errorCode(error);
-    const preview = response ? truncateUtf8(response.bodyText, RESPONSE_PREVIEW_LENGTH) : null;
-    assertions = error instanceof HttpError && error.code === "RUN_VARIABLE_NOT_FOUND"
-      ? [{ name: "Request variables", passed: false, errorCode: "ASSERTION_FAILED" }]
-      : [];
+    const preview = response
+      ? truncateUtf8(maskSecretValues(response.bodyText, secretValues), RESPONSE_PREVIEW_LENGTH)
+      : null;
+    if (error instanceof HttpError && error.code === "RUN_VARIABLE_NOT_FOUND") {
+      assertions.push({ name: "Request variables", passed: false, errorCode: "ASSERTION_FAILED" });
+    }
     return {
       status: "error",
       durationMs: Date.now() - startedAt,
@@ -325,6 +411,8 @@ export async function runCollection(
   userId: string,
   input: CollectionRunInput,
   proxyOptions: RunnerProxyOptions,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
   folderId?: string,
 ): Promise<RunDetail> {
   // The environment and the shared variables come from the collection's own team.
@@ -345,7 +433,19 @@ export async function runCollection(
       maxRequests: MAX_RUN_REQUESTS,
     });
   }
-  const variables = await loadRunVariables(db, userId, teamId, input.environmentId);
+  const loadedVariables = await loadRunVariables(
+    db,
+    userId,
+    teamId,
+    input.environmentId,
+    encryptionKey,
+    previousEncryptionKey,
+  );
+  const loadedContracts = await loadRunContracts(db, collectionId);
+  const validateContract = loadedContracts.document
+    ? createOpenApiContractValidator(loadedContracts.document)
+    : undefined;
+  const variables = loadedVariables.values;
   const runId = newId();
   const startedAt = nowIso();
   const startTimeMs = Date.now();
@@ -376,16 +476,30 @@ export async function runCollection(
             assertions: [] as AssertionResult[],
             errorCode: "RUN_TIMEOUT",
           }
-        : await runOneRequest(request, variables, proxyOptions, runDeadline);
+        : await runOneRequest(
+            request,
+            variables,
+            proxyOptions,
+            runDeadline,
+            loadedVariables.secretValues,
+            loadedContracts.operationByItemId.get(request.id),
+            validateContract,
+          );
       if (result.status === "passed") passedCount += 1;
       else failedCount += 1;
+      const safeResult = {
+        ...result,
+        responsePreview: result.responsePreview === null
+          ? null
+          : maskSecretValues(result.responsePreview, loadedVariables.secretValues),
+      };
       await db.insert(testRunResults).values({
         id: newId(),
         runId,
         position,
         itemId: request.id,
         itemName: request.name,
-        ...result,
+        ...safeResult,
       });
     }
     const finishedAt = nowIso();

@@ -8,11 +8,13 @@ import { compareByName, nameKey, newId, nowIso, resolveAttribution } from "./com
 import { copyNameAsync } from "./copyName.js";
 import type { DbExecutor } from "./tree.js";
 import { recordActivity } from "./activity.js";
+import { decryptEnvironmentValue, encryptEnvironmentValue } from "./secretValues.js";
 
 export interface EnvironmentVariable {
   key: string;
   value: string;
   enabled: boolean;
+  isSecret: boolean;
 }
 
 function isDuplicateEntry(error: unknown): boolean {
@@ -34,7 +36,12 @@ export interface Environment {
 
 type EnvironmentRow = typeof environments.$inferSelect;
 
-async function hydrate(db: DbExecutor, rows: EnvironmentRow[]): Promise<Environment[]> {
+async function hydrate(
+  db: DbExecutor,
+  rows: EnvironmentRow[],
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment[]> {
   const variables = new Map<string, EnvironmentVariable[]>();
   const ids = rows.map((r) => r.id);
   for (let i = 0; i < ids.length; i += 500) {
@@ -45,7 +52,12 @@ async function hydrate(db: DbExecutor, rows: EnvironmentRow[]): Promise<Environm
       .orderBy(asc(environmentVariables.environmentId), asc(environmentVariables.position));
     for (const v of varRows) {
       const list = variables.get(v.environmentId) ?? [];
-      list.push({ key: v.key, value: v.value, enabled: v.enabled });
+      list.push({
+        key: v.key,
+        value: decryptEnvironmentValue(v.value, v.valueEncryptionVersion, encryptionKey, previousEncryptionKey).value,
+        enabled: v.enabled,
+        isSecret: v.isSecret,
+      });
       variables.set(v.environmentId, list);
     }
   }
@@ -78,6 +90,8 @@ export async function addEnvironmentVariable(
   id: string,
   input: EnvironmentVariableCreateInput,
   actorId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
 ): Promise<Environment> {
   try {
     return await db.transaction(async (tx) => {
@@ -105,6 +119,8 @@ export async function addEnvironmentVariable(
         environmentId: id,
         position: (lastVariable?.position ?? -1) + 1,
         ...input,
+        value: encryptEnvironmentValue(input.value, encryptionKey),
+        valueEncryptionVersion: 1,
       });
       const updatedAt = nowIso();
       await tx.update(environments).set({ updatedAt, updatedBy: actorId }).where(eq(environments.id, id));
@@ -118,7 +134,7 @@ export async function addEnvironmentVariable(
         details: { variableKey: input.key },
         createdAt: updatedAt,
       });
-      return readEnvironment(tx, id);
+      return readEnvironment(tx, id, encryptionKey, previousEncryptionKey);
     });
   } catch (error) {
     if (isDuplicateEntry(error)) {
@@ -155,24 +171,52 @@ export function environmentNameConflictError(name: string, existingId: string): 
   });
 }
 
-async function writeVariables(db: DbExecutor, environmentId: string, variables: EnvironmentInput["variables"]): Promise<void> {
+async function writeVariables(
+  db: DbExecutor,
+  environmentId: string,
+  variables: EnvironmentInput["variables"],
+  encryptionKey: string,
+): Promise<void> {
   await db.delete(environmentVariables).where(eq(environmentVariables.environmentId, environmentId));
   if (variables.length > 0) {
-    await db.insert(environmentVariables).values(variables.map((v, position) => ({ environmentId, position, ...v })));
+    await db.insert(environmentVariables).values(variables.map((v, position) => ({
+      environmentId,
+      position,
+      ...v,
+      value: encryptEnvironmentValue(v.value, encryptionKey),
+      valueEncryptionVersion: 1,
+    })));
   }
 }
 
-export async function listEnvironments(db: AppDatabase, teamId: string): Promise<Environment[]> {
+export async function listEnvironments(
+  db: AppDatabase,
+  teamId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment[]> {
   const rows = await db.select().from(environments).where(and(eq(environments.teamId, teamId), isNull(environments.deletedAt)));
-  return (await hydrate(db, rows)).sort(compareByName);
+  return (await hydrate(db, rows, encryptionKey, previousEncryptionKey)).sort(compareByName);
 }
 
-export async function readEnvironment(db: DbExecutor, id: string): Promise<Environment> {
-  const [env] = await hydrate(db, [await requireActive(db, id)]);
+export async function readEnvironment(
+  db: DbExecutor,
+  id: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment> {
+  const [env] = await hydrate(db, [await requireActive(db, id)], encryptionKey, previousEncryptionKey);
   return env!;
 }
 
-export function createEnvironment(db: AppDatabase, teamId: string, input: EnvironmentInput, actorId: string): Promise<Environment> {
+export function createEnvironment(
+  db: AppDatabase,
+  teamId: string,
+  input: EnvironmentInput,
+  actorId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment> {
   return db.transaction(async (tx) => {
       const existing = await findActiveEnvironmentByName(tx, teamId, input.name);
       if (existing) throw environmentNameConflictError(input.name, existing.id);
@@ -191,7 +235,7 @@ export function createEnvironment(db: AppDatabase, teamId: string, input: Enviro
           updatedBy: actorId,
         })
         ;
-      await writeVariables(tx, id, input.variables);
+      await writeVariables(tx, id, input.variables, encryptionKey);
       await recordActivity(tx, {
         teamId,
         actorId,
@@ -202,12 +246,19 @@ export function createEnvironment(db: AppDatabase, teamId: string, input: Enviro
         details: { variableCount: input.variables.length },
         createdAt: timestamp,
       });
-      return readEnvironment(tx, id);
+      return readEnvironment(tx, id, encryptionKey, previousEncryptionKey);
     });
 }
 
 /** Explicit save: replaces the environment's name and full variable list (last save wins). */
-export function updateEnvironment(db: AppDatabase, id: string, input: EnvironmentInput, actorId: string): Promise<Environment> {
+export function updateEnvironment(
+  db: AppDatabase,
+  id: string,
+  input: EnvironmentInput,
+  actorId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment> {
   return db.transaction(async (tx) => {
       const current = await requireActive(tx, id);
       const existing = await findActiveEnvironmentByName(tx, current.teamId, input.name, id);
@@ -217,7 +268,7 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
         .set({ name: input.name, nameKey: nameKey(input.name), updatedAt: nowIso(), updatedBy: actorId })
         .where(eq(environments.id, id))
         ;
-      await writeVariables(tx, id, input.variables);
+      await writeVariables(tx, id, input.variables, encryptionKey);
       await recordActivity(tx, {
         teamId: current.teamId,
         actorId,
@@ -227,7 +278,7 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
         resourceName: input.name,
         details: { changedFields: [...(current.name !== input.name ? ["name"] : []), "variables"], variableCount: input.variables.length },
       });
-      return readEnvironment(tx, id);
+      return readEnvironment(tx, id, encryptionKey, previousEncryptionKey);
     });
 }
 
@@ -237,10 +288,16 @@ export function updateEnvironment(db: AppDatabase, id: string, input: Environmen
  * The variables are read back rather than copied row by row, because `writeVariables` is already
  * the one place that decides how a variable list is stored - positions included.
  */
-export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): Promise<Environment> {
+export function cloneEnvironment(
+  db: AppDatabase,
+  id: string,
+  actorId: string,
+  encryptionKey: string,
+  previousEncryptionKey?: string,
+): Promise<Environment> {
   return db.transaction(async (tx) => {
       const { teamId } = await requireActive(tx, id);
-      const source = await readEnvironment(tx, id);
+      const source = await readEnvironment(tx, id, encryptionKey, previousEncryptionKey);
       const name = await copyNameAsync(
         source.name,
         async (candidate) => (await findActiveEnvironmentByName(tx, teamId, candidate)) !== undefined,
@@ -260,7 +317,7 @@ export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): 
           updatedBy: actorId,
         })
         ;
-      await writeVariables(tx, newEnvironmentId, source.variables);
+      await writeVariables(tx, newEnvironmentId, source.variables, encryptionKey);
       await recordActivity(tx, {
         teamId,
         actorId,
@@ -271,7 +328,7 @@ export function cloneEnvironment(db: AppDatabase, id: string, actorId: string): 
         details: { sourceEnvironmentId: id, variableCount: source.variables.length },
         createdAt: timestamp,
       });
-      return readEnvironment(tx, newEnvironmentId);
+      return readEnvironment(tx, newEnvironmentId, encryptionKey, previousEncryptionKey);
     });
 }
 

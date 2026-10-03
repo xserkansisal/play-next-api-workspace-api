@@ -61,6 +61,14 @@ GRANT ALL PRIVILEGES ON play_next_api.* TO 'play_next_api'@'127.0.0.1';
 ## Configure environment and migrate
 
 Apply pending database migrations before deploying an API version that uses newly added columns.
+Migration `0024_encrypt_environment_variables` adds the secret flag and encryption metadata. During
+migration/startup the API encrypts existing environment values in batches before listening. Startup
+fails rather than serving plaintext or unreadable ciphertext if a required key is unavailable.
+Stop the running API before this upgrade so an older process cannot write new plaintext values.
+Back up the database and keep the matching `ENCRYPTION_KEY` before running this upgrade. This is a
+one-way data transition for old application versions: do not roll back to a release that expects
+plaintext environment values.
+
 Migration `0007_fuzzy_risque` creates collection and item version-history tables. Existing resources
 start with empty history; subsequent successful collection and item edits create the first snapshots.
 Migration `0004_spooky_trish_tilby` adds profile-name columns with empty defaults, so the previous
@@ -71,7 +79,8 @@ rolled back by dropping both columns, but the derived values cannot be reconstru
 edits; back up the database before rollback.
 
 Export the production settings in the shell or service-management environment used to invoke
-PM2. The ecosystem file requires `PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, and `AUTH_CODE_PEPPER`; production
+PM2. The ecosystem file requires `PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`,
+`AUTH_CODE_PEPPER`, and `ENCRYPTION_KEY`; production
 environment validation also requires `SMTP_HOST` and `SMTP_FROM`. It defaults `HOST` to
 `127.0.0.1`, `SSE_HEARTBEAT_MS` to `15000`, `SSE_RETRY_MS` to `3000`, the code lifetime to
 900 seconds, the code-attempt limit to 5, request/verify rate limits to 3/10 per 900 seconds,
@@ -92,6 +101,7 @@ export MYSQL_DATABASE=play_next_api
 export SSE_HEARTBEAT_MS=15000
 export SSE_RETRY_MS=3000
 export AUTH_CODE_PEPPER=          # generate once, paste the result here - see "Sign-in code pepper" below
+export ENCRYPTION_KEY=            # generate once, paste the result here - see "Environment value encryption" below
 export AUTH_CODE_TTL_SECONDS=900
 export AUTH_CODE_MAX_ATTEMPTS=5
 export AUTH_CODE_REQUEST_LIMIT=3
@@ -240,6 +250,34 @@ code. `tests/integration/auth.test.ts` locks this behaviour in.
 
 Note that with no TLS in front of the API, the code itself still travels in plain text over the
 internal network. The pepper protects a stolen database, not the wire.
+
+### Environment value encryption
+
+All environment variable values are encrypted in MySQL with AES-256-GCM, whether or not the
+variable is marked `isSecret`. Authorized environment API reads still return the actual values so
+the existing client-side request-substitution flow keeps working. Marking a variable secret also
+redacts exact occurrences from saved collection-run response previews; it does not change runner
+execution.
+
+Generate a separate random key per deployment (do not reuse `AUTH_CODE_PEPPER`):
+
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Set the output as `ENCRYPTION_KEY` in the service environment or the protected environment file.
+Production rejects the development placeholder and weak keys. Keep the key outside the database,
+repository, and backups; a database backup is unusable for environment values without its
+corresponding key. Restores must use the matching key.
+
+To rotate a key, first make a verified database backup. Set `ENCRYPTION_KEY` to the new random key
+and `ENCRYPTION_KEY_PREVIOUS` to the current key, stop the API to prevent mixed-version writes, then
+run `npm run db:migrate` and restart the service with both values. The migration identifies old
+ciphertext by key id and re-encrypts it in batches; it also resumes safely after interruption.
+Verify environment reads before removing
+`ENCRYPTION_KEY_PREVIOUS` and restarting again. If an old key is not configured, startup fails
+closed rather than serving unreadable values. Preserve old keys for backups that have not been
+rotated.
 
 Apply pending migrations explicitly before starting the new release:
 
